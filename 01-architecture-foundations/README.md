@@ -51,47 +51,9 @@ The defining example is a customer with $2,000 who spends $500 and immediately c
 
 ## Final Architecture
 
-The SVG is the default reading view: a narrow, vertical layout that scales on mobile and desktop. Expand the Mermaid source for a second rendering or editing. The ASCII flow remains portable in plain-text readers.
-
 ![Available-balance request path from channels through the gateway and stateless service to the authoritative database, with replication and safe failover](assets/balance-architecture.svg)
 
 [Open the scalable architecture diagram](assets/balance-architecture.svg)
-
-<details>
-<summary>Mermaid — final baseline architecture</summary>
-
-```mermaid
-flowchart TD
-    C["Mobile / Web / ATM / Contact centre"] --> G["Gateway + load balancer<br/>Authenticate, throttle, route to healthy instances"]
-    G --> S["Stateless balance-service fleet across AZs<br/>Validate identity and account authorization"]
-    S --> P["Bounded dependency access<br/>Timeouts, circuit breaker, concurrency and DB pools"]
-    P --> D["Authoritative balance database<br/>Strong reads through valid leader / supported policy"]
-    D --> R["Replicas / standbys across failure zones<br/>Replication and eligible safe failover"]
-    D -.-> B["Backups for recovery<br/>Separate from immediate failover"]
-```
-
-</details>
-
-```text
-Mobile / Web / ATM / Contact centre
-                  |
-           Gateway + LB
-      authentication / admission
-                  |
-     Stateless balance services
-    service + account authorization
-                  |
-      Bounded dependency access
-    timeouts / breaker / DB pool
-                  |
-     Authoritative DB / leader
-        |                  |
-   HA replicas          Backups
-   safe failover         recovery
-
-Response returns through the same request path.
-Metrics, logs and traces observe that path.
-```
 
 **End-to-end read flow**
 
@@ -181,20 +143,6 @@ The useful mistake was assuming an ACID transaction prevented stale replica read
 
 ![Quorum example showing B and C holding two of three votes while isolated old leader A cannot commit authoritative writes](assets/quorum-failover.svg)
 
-<details>
-<summary>Mermaid — three-node partition and failover</summary>
-
-```mermaid
-flowchart TD
-    P["Network partition: three voting nodes"] --> M["B + C can communicate<br/>2 of 3 votes: majority"]
-    P --> I["Old leader A is isolated<br/>1 of 3 votes: no majority"]
-    M --> E["Elect an eligible leader<br/>Preserve committed history"]
-    E --> W["Resume under configured commit and read rules"]
-    I --> X["Cannot commit authoritative writes<br/>Must not serve unverified strong reads"]
-```
-
-</details>
-
 Nodes exchange heartbeats. Loss of contact triggers suspicion and an election, not proof that the old leader is dead. Eligible candidates seek votes under the cluster's term/epoch and replicated-log rules. A majority establishes authority; stale authority must not continue committing conflicting writes. Clients then reach the valid leader. This logic belongs in the database/coordination system, commonly through consensus such as Raft, rather than custom balance-service voting.
 
 Two majority sets overlap. That fact supports safety **together with** voting, term, log, and authority-enforcement rules; counting nodes alone is insufficient. An eligible replacement must preserve committed history, rather than arbitrarily promoting a replica that is five transactions behind.
@@ -249,21 +197,6 @@ The 12-instance example provides 20% extra capacity above the 10-instance requir
 The dangerous cascade is **slow DB → occupied connections → queue growth → timeouts → retries → more DB pressure**. A dependency can be healthy at the process level while its network path is unreliable or its callers are blocked waiting for capacity.
 
 ![Bounded overload response: admission controls, capped concurrency and queueing, fast failure, then bounded backoff and jitter](assets/overload-protection.svg)
-
-<details>
-<summary>Mermaid — overload protection</summary>
-
-```mermaid
-flowchart TD
-    A["Incoming demand"] --> B["Throttle / admit safe traffic"]
-    B --> C["Cap concurrency and DB connections<br/>Use a small bounded queue"]
-    C --> D["Capacity exhausted or dependency unhealthy"]
-    D --> E["Fail fast on affected path<br/>503; Retry-After when appropriate"]
-    E --> F["Bounded retries<br/>Exponential backoff + jitter"]
-    F --> G["Controlled recovery<br/>Limited half-open probes for an open breaker"]
-```
-
-</details>
 
 | Failure | System Behaviour | Detection | Recovery / Mitigation |
 |---|---|---|---|
