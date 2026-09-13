@@ -70,7 +70,7 @@ Each architecture topic evaluates whether AI belongs in the system. The dedicate
 
 - Architecture drills completed: 2 of 23.
 - Final chapter READMEs completed: 2 of 23.
-- Current chapter: Topic 2 — URL Shortener.
+- Current chapter: Topic 3 — Rate Limiter.
 
 ## Content standards
 
