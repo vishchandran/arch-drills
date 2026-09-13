@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="910" viewBox="0 0 440 910" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Failure response</title>
+<desc id="desc">Control plane unavailable; Use last-known-good policy; Track age; respect grant expiry. Redis slow / unavailable; Use remaining valid local quota; Bound refill timeout and retries. Quota or grant unavailable; Apply endpoint fallback policy; Known quota exhaustion → 429. Balance inquiry; Local fallback; fail open if needed; Retain downstream safety limits. Payment initiation; Small emergency quota if designed; Otherwise fail closed. Login / OTP; Fail closed without safe enforcement; State loss must not reset allowance</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">Failure response</text>
+<rect x="20" y="64" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="92" font-size="20" font-weight="700">Control plane unavailable</text>
+<text x="34" y="120" font-size="19" font-weight="400">Use last-known-good policy</text>
+<text x="34" y="148" font-size="19" font-weight="400">Track age; respect grant expiry</text>
+<rect x="20" y="204" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="232" font-size="20" font-weight="700">Redis slow / unavailable</text>
+<text x="34" y="260" font-size="19" font-weight="400">Use remaining valid local quota</text>
+<text x="34" y="288" font-size="19" font-weight="400">Bound refill timeout and retries</text>
+<path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="372" font-size="20" font-weight="700">Quota or grant unavailable</text>
+<text x="34" y="400" font-size="19" font-weight="400">Apply endpoint fallback policy</text>
+<text x="34" y="428" font-size="19" font-weight="400">Known quota exhaustion → 429</text>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="512" font-size="20" font-weight="700">Balance inquiry</text>
+<text x="34" y="540" font-size="19" font-weight="400">Local fallback; fail open if needed</text>
+<text x="34" y="568" font-size="19" font-weight="400">Retain downstream safety limits</text>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="652" font-size="20" font-weight="700">Payment initiation</text>
+<text x="34" y="680" font-size="19" font-weight="400">Small emergency quota if designed</text>
+<text x="34" y="708" font-size="19" font-weight="400">Otherwise fail closed</text>
+<rect x="20" y="764" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="792" font-size="20" font-weight="700">Login / OTP</text>
+<text x="34" y="820" font-size="19" font-weight="400">Fail closed without safe enforcement</text>
+<text x="34" y="848" font-size="19" font-weight="400">State loss must not reset allowance</text>
+</g></svg>

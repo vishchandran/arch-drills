@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="770" viewBox="0 0 440 770" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">AI and policy governance</title>
+<desc id="desc">Gateway telemetry / events; Asynchronous pattern analysis; Outside request decisions. AI recommendation; Bots, IP rotation, tenant anomalies; No direct production quota changes. Deterministic validation; Contract, history, seasonality; Quota floors + bounded changes. Approval and staged rollout; Human / policy-engine approval; Canary → partial → full rollout. Versioned gateway policy; Monitor 429s and customer impact; Rollback to last-known-good policy</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">AI and policy governance</text>
+<rect x="20" y="64" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="92" font-size="20" font-weight="700">Gateway telemetry / events</text>
+<text x="34" y="120" font-size="19" font-weight="400">Asynchronous pattern analysis</text>
+<text x="34" y="148" font-size="19" font-weight="400">Outside request decisions</text>
+<path d="M220 168 V194" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="204" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="232" font-size="20" font-weight="700">AI recommendation</text>
+<text x="34" y="260" font-size="19" font-weight="400">Bots, IP rotation, tenant anomalies</text>
+<text x="34" y="288" font-size="19" font-weight="400">No direct production quota changes</text>
+<path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="372" font-size="20" font-weight="700">Deterministic validation</text>
+<text x="34" y="400" font-size="19" font-weight="400">Contract, history, seasonality</text>
+<text x="34" y="428" font-size="19" font-weight="400">Quota floors + bounded changes</text>
+<path d="M220 448 V474" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="512" font-size="20" font-weight="700">Approval and staged rollout</text>
+<text x="34" y="540" font-size="19" font-weight="400">Human / policy-engine approval</text>
+<text x="34" y="568" font-size="19" font-weight="400">Canary → partial → full rollout</text>
+<path d="M220 588 V614" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="652" font-size="20" font-weight="700">Versioned gateway policy</text>
+<text x="34" y="680" font-size="19" font-weight="400">Monitor 429s and customer impact</text>
+<text x="34" y="708" font-size="19" font-weight="400">Rollback to last-known-good policy</text>
+</g></svg>
