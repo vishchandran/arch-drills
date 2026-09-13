@@ -17,7 +17,7 @@ Follow the numbered folders in curriculum order. Each folder contains its own RE
 | Topic | Status |
 |---|---|
 | [1. Architecture Foundations](01-architecture-foundations/README.md) | Complete |
-| [2. URL Shortener](02-url-shortener/README.md) | Planned |
+| [2. URL Shortener](02-url-shortener/README.md) | Complete |
 | [3. Rate Limiter](03-rate-limiter/README.md) | Planned |
 | [4. API Gateway + Global Load Balancing](04-api-gateway-global-load-balancing/README.md) | Planned |
 | [5. Service Mesh + Service Discovery](05-service-mesh-service-discovery/README.md) | Planned |
@@ -45,7 +45,7 @@ Follow the numbered folders in curriculum order. Each folder contains its own RE
 Completed chapters cover the applicable sections:
 
 - Problem & Requirements
-- Final Architecture with ASCII flow
+- Final Architecture with responsive SVG diagrams
 - Component Responsibilities
 - Key Architecture Decisions
 - Data & Consistency
@@ -68,11 +68,10 @@ Each architecture topic evaluates whether AI belongs in the system. The dedicate
 
 ## Progress
 
-- Architecture drills completed: 1 of 23.
-- Final chapter READMEs completed: 1 of 23.
-- Current chapter: Topic 1 — Architecture Foundations.
+- Architecture drills completed: 2 of 23.
+- Final chapter READMEs completed: 2 of 23.
+- Current chapter: Topic 2 — URL Shortener.
 
 ## Content standards
 
 Keep chapters code-free, architecture-focused, and understandable without the original conversation. Explain why decisions were made, expose trade-offs and failure behavior, expand abbreviations, and preserve useful mistakes. Avoid documenting uncompleted drills as established designs.
-

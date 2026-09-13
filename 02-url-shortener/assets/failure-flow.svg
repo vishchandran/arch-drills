@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="1100" viewBox="0 0 440 1100" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Failure behavior</title>
+<desc id="desc">Independent failure cases: cache outage uses bounded replica fallback; writer and region outages pause creation until safe promotion while existing reads may survive.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="23" font-weight="700">Failure behavior</text>
+<rect x="20" y="64" width="400" height="112" rx="12" fill="#fff6e7" stroke="#b88731"/>
+<text x="36" y="93" font-size="21" font-weight="700">Cache failure</text>
+<text x="36" y="122" font-size="20">Bound fallback to read replicas</text>
+<text x="36" y="149" font-size="20">Throttle excess; protect DB capacity</text>
+<path d="M220 176 V212" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="222" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="251" font-size="21" font-weight="700">Replica slow or unavailable</text>
+<text x="36" y="280" font-size="20">Timeouts + circuit breaking</text>
+<text x="36" y="307" font-size="20">Controlled failure when over budget</text>
+<text x="20" y="388" font-size="19">Independent writer-failure response:</text>
+<rect x="20" y="410" width="400" height="112" rx="12" fill="#fff6e7" stroke="#b88731"/>
+<text x="36" y="439" font-size="21" font-weight="700">Primary failed or isolated</text>
+<text x="36" y="468" font-size="20">Existing reachable mappings redirect</text>
+<text x="36" y="495" font-size="20">Creation pauses without authority</text>
+<path d="M220 522 V558" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="568" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="597" font-size="21" font-weight="700">Safe promotion</text>
+<text x="36" y="626" font-size="20">Fence old writer; eligible replacement</text>
+<text x="36" y="653" font-size="20">Preserve commits and ID allocation</text>
+<text x="20" y="734" font-size="19">Regional extension — active-passive:</text>
+<rect x="20" y="756" width="400" height="112" rx="12" fill="#fff6e7" stroke="#b88731"/>
+<text x="36" y="785" font-size="21" font-weight="700">Active region fails</text>
+<text x="36" y="814" font-size="20">Standby serves surviving mappings</text>
+<text x="36" y="841" font-size="20">Creation waits for safe promotion</text>
+<path d="M220 868 V904" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="914" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="943" font-size="21" font-weight="700">Recovery policy</text>
+<text x="36" y="972" font-size="20">Check data, routing and capacity</text>
+<text x="36" y="999" font-size="20">Regional lag may mean data loss</text>
+<text x="20" y="1071" font-size="19">A cache copy is never proof of durability.</text>
+</g></svg>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="1040" viewBox="0 0 440 1040" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">URL shortener architecture</title>
+<desc id="desc">Clients reach the URL Service. Creation goes to primary DB; redirects use cache then read replicas. Primary replicates to database replicas.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="23" font-weight="700">URL shortener architecture</text>
+<rect x="20" y="64" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="93" font-size="21" font-weight="700">Clients → gateway / balancer</text>
+<text x="36" y="122" font-size="20">Admission and health-based routing</text>
+<text x="36" y="149" font-size="20">Multiple stateless URL Services</text>
+<path d="M220 176 V216" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="226" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="255" font-size="21" font-weight="700">CREATE → primary database</text>
+<text x="36" y="284" font-size="20">Generate unique numeric ID</text>
+<text x="36" y="311" font-size="20">Commit with durable replica ack</text>
+<path d="M220 338 V378" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="236" y="364" font-size="19">replication</text>
+<rect x="20" y="388" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="417" font-size="21" font-weight="700">Database replicas</text>
+<text x="36" y="446" font-size="20">Read replicas serve cache misses</text>
+<text x="36" y="473" font-size="20">Eligible replicas support failover</text>
+<text x="20" y="541" font-size="19">Separate redirect path from URL Service:</text>
+<rect x="20" y="562" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="591" font-size="21" font-weight="700">REDIRECT → distributed cache</text>
+<text x="36" y="620" font-size="20">Decode short code to numeric ID</text>
+<text x="36" y="647" font-size="20">HIT: return destination to service</text>
+<path d="M220 674 V714" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="236" y="700" font-size="19">MISS</text>
+<rect x="20" y="724" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="753" font-size="21" font-weight="700">Service → read replica</text>
+<text x="36" y="782" font-size="20">Indexed lookup by numeric ID</text>
+<text x="36" y="809" font-size="20">Found: fill cache; return destination</text>
+<path d="M220 836 V876" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="886" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="915" font-size="21" font-weight="700">Service → browser</text>
+<text x="36" y="944" font-size="20">HTTP redirect with Location</text>
+<text x="36" y="971" font-size="20">Browser follows the destination</text>
+</g></svg>
