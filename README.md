@@ -18,7 +18,7 @@ Follow the numbered folders in curriculum order. Each folder contains its own RE
 |---|---|
 | [1. Architecture Foundations](01-architecture-foundations/README.md) | Complete |
 | [2. URL Shortener](02-url-shortener/README.md) | Complete |
-| [3. Rate Limiter](03-rate-limiter/README.md) | Planned |
+| [3. Rate Limiter](03-rate-limiter/README.md) | Complete |
 | [4. API Gateway + Global Load Balancing](04-api-gateway-global-load-balancing/README.md) | Planned |
 | [5. Service Mesh + Service Discovery](05-service-mesh-service-discovery/README.md) | Planned |
 | [6. Distributed Cache](06-distributed-cache/README.md) | Planned |
@@ -68,9 +68,9 @@ Each architecture topic evaluates whether AI belongs in the system. The dedicate
 
 ## Progress
 
-- Architecture drills completed: 2 of 23.
-- Final chapter READMEs completed: 2 of 23.
-- Current chapter: Topic 3 — Rate Limiter.
+- Architecture drills completed: 3 of 23.
+- Final chapter READMEs completed: 3 of 23.
+- Current chapter: Topic 4 — API Gateway + Global Load Balancing.
 
 ## Content standards
 
