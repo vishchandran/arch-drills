@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="452" viewBox="0 0 380 452" role="img" aria-labelledby="title desc">
+<title id="title">Global region selection</title>
+<desc id="desc">Client → DNS resolves the entry endpoint; Resolution precedes the API connection → Global traffic policy; Residency, health and safe capacity → Selected regional ingress; Canada, US or Europe</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#49647a"/></marker></defs>
+<rect width="380" height="452" rx="12" fill="#ffffff"/>
+<text x="190" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#18364b">Global region selection</text>
+<rect x="20" y="52" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Client</text>
+<path d="M190 122 V139" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="146" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="175" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">DNS resolves the entry endpoint</text>
+<text x="190" y="198" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Resolution precedes the API connection</text>
+<path d="M190 216 V233" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="240" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="269" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Global traffic policy</text>
+<text x="190" y="292" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Residency, health and safe capacity</text>
+<path d="M190 310 V327" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="334" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="363" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Selected regional ingress</text>
+<text x="190" y="386" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Canada, US or Europe</text>
+</svg>

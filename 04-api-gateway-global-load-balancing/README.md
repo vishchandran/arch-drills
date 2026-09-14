@@ -51,40 +51,23 @@ Expose mobile/web banking, payments, balances, login, OTP, beneficiaries, cards,
 
 ## Final Architecture
 
-The diagrams separate global selection, the repeated regional path, and configuration distribution to keep each view readable on GitHub web and mobile.
+The SVG diagrams separate global selection, the repeated regional path, and configuration distribution to keep each view readable on GitHub web and mobile.
 
-```mermaid
-flowchart TD
-    C[Client] --> E[Global entry]
-    D[DNS resolution] -.-> E
-    E --> P[Eligible healthy region]
-    P --> CA[Canada ingress]
-    P --> US[US ingress]
-    P --> EU[Europe ingress]
-```
+![Global entry and eligible region selection](assets/global-entry.svg)
+
+[Open the scalable diagram](assets/global-entry.svg)
 
 **DNS clarification.** DNS resolves the endpoint before the API connection; it does not proxy the HTTP request. With DNS steering, region selection influences the DNS answer and the client connects to regional ingress. With a global proxy, DNS resolves the global entry and that entry forwards to an eligible region. The diagram shows logical responsibilities, not a requirement to deploy both mechanisms as serial network hops. Edge WAF/DDoS controls apply before traffic consumes regional application capacity.
 
-```mermaid
-flowchart TD
-    E[Selected ingress] --> W[WAF protection]
-    W --> L[Regional LB]
-    L --> G[Gateway fleet]
-    G --> I[Internal balancing]
-    I --> S[Banking service fleet]
-    S --> D[Downstream dependencies]
-```
+![Regional request path from ingress to downstream dependencies](assets/regional-request-path.svg)
+
+[Open the scalable diagram](assets/regional-request-path.svg)
 
 Each region repeats this path across AZs. The WAF may be integrated into global/edge ingress rather than deployed as a separate regional appliance. Internal balancing can use service discovery, a service LB, a Kubernetes Service, a mesh proxy, or client-side balancing. The requirement is healthy instance selection, not another mandatory appliance.
 
-```mermaid
-flowchart TD
-    C[Global control plane] --> V[Validated versioned config]
-    V --> P[Regional distribution]
-    P --> CA[Canada data plane]
-    P --> US[US data plane]
-    P --> EU[Europe data plane]
-```
+![Global control plane distributes configuration to regional data planes](assets/control-plane.svg)
+
+[Open the scalable diagram](assets/control-plane.svg)
 
 The control plane defines routes, auth policies, rate-limit policies, tenant quotas, certificate lifecycle, versions, and rollout state. Distribution propagates approved configuration. Regional data planes serve and enforce it. A control-plane outage should impair management capability while requests continue under the last-known-good configuration.
 

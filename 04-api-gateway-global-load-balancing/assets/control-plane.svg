@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="546" viewBox="0 0 380 546" role="img" aria-labelledby="title desc">
+<title id="title">Configuration distribution</title>
+<desc id="desc">Global control plane; Define policy and desired configuration → Validated, versioned configuration → Regional distribution; Propagate approved configuration → Regional data planes; Canada, US and Europe → Serve and enforce locally; Use last-known-good configuration</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#49647a"/></marker></defs>
+<rect width="380" height="546" rx="12" fill="#ffffff"/>
+<text x="190" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#18364b">Configuration distribution</text>
+<rect x="20" y="52" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="81" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Global control plane</text>
+<text x="190" y="104" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Define policy and desired configuration</text>
+<path d="M190 122 V139" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="146" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="188" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Validated, versioned configuration</text>
+<path d="M190 216 V233" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="240" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="269" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Regional distribution</text>
+<text x="190" y="292" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Propagate approved configuration</text>
+<path d="M190 310 V327" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="334" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="363" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Regional data planes</text>
+<text x="190" y="386" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Canada, US and Europe</text>
+<path d="M190 404 V421" stroke="#49647a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="428" width="340" height="70" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text x="190" y="457" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#18364b">Serve and enforce locally</text>
+<text x="190" y="480" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#18364b">Use last-known-good configuration</text>
+</svg>
