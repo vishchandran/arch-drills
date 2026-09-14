@@ -19,7 +19,7 @@ Follow the numbered folders in curriculum order. Each folder contains its own RE
 | [1. Architecture Foundations](01-architecture-foundations/README.md) | Complete |
 | [2. URL Shortener](02-url-shortener/README.md) | Complete |
 | [3. Rate Limiter](03-rate-limiter/README.md) | Complete |
-| [4. API Gateway + Global Load Balancing](04-api-gateway-global-load-balancing/README.md) | Planned |
+| [4. API Gateway + Global Load Balancing](04-api-gateway-global-load-balancing/README.md) | Complete |
 | [5. Service Mesh + Service Discovery](05-service-mesh-service-discovery/README.md) | Planned |
 | [6. Distributed Cache](06-distributed-cache/README.md) | Planned |
 | [7. Kafka + Event-Driven Architecture](07-kafka-event-driven-architecture/README.md) | Planned |
@@ -45,7 +45,7 @@ Follow the numbered folders in curriculum order. Each folder contains its own RE
 Completed chapters cover the applicable sections:
 
 - Problem & Requirements
-- Final Architecture with responsive SVG diagrams
+- Final Architecture with responsive SVG or compact Mermaid diagrams
 - Component Responsibilities
 - Key Architecture Decisions
 - Data & Consistency
@@ -59,6 +59,8 @@ Completed chapters cover the applicable sections:
 - TPM Delivery
 - Program Risks
 - TPM Constraint Mutations
+- Production Readiness
+- Rollout & Rollback
 - Concepts Learned
 - Mental Models
 
@@ -68,9 +70,9 @@ Each architecture topic evaluates whether AI belongs in the system. The dedicate
 
 ## Progress
 
-- Architecture drills completed: 3 of 23.
-- Final chapter READMEs completed: 3 of 23.
-- Current chapter: Topic 4 — API Gateway + Global Load Balancing.
+- Architecture drills completed: 4 of 23.
+- Final chapter READMEs completed: 4 of 23.
+- Current chapter: Topic 5 — Service Mesh + Service Discovery.
 
 ## Content standards
 
