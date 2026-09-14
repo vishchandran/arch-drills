@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="650" viewBox="0 0 380 650" role="img" aria-labelledby="title desc">
+  <title id="title">Regional failover flow</title>
+  <desc id="desc">After a failure threshold, check target readiness. If it is not ready, degrade or reject safely. If ready, admit within spare capacity, shift new traffic, observe impact, and recover with hysteresis.</desc>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#49647a"/></marker></defs>
+  <rect width="380" height="650" rx="12" fill="#fff"/>
+  <text x="190" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#18364b">Regional failover flow</text>
+  <g font-family="Arial,sans-serif" text-anchor="middle" fill="#18364b">
+    <rect x="30" y="55" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="90" font-size="15">Failure threshold reached</text>
+    <path d="M190 113v30" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <path d="M190 145l145 70-145 70-145-70z" fill="#fff6df" stroke="#c79d42"/><text x="190" y="211" font-size="15">Eligible target ready?</text>
+    <path d="M45 215H18v83" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/><text x="28" y="205" font-size="13">No</text>
+    <rect x="30" y="305" width="320" height="58" rx="9" fill="#fdeeee" stroke="#c78585"/><text x="190" y="340" font-size="15">Degrade or reject safely</text>
+    <path d="M335 215h27v170H190v30" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/><text x="350" y="205" font-size="13">Yes</text>
+    <rect x="30" y="420" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="455" font-size="15">Admit within spare capacity</text>
+    <path d="M190 478v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="510" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="545" font-size="15">Shift new traffic and observe impact</text>
+    <path d="M190 568v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="600" width="320" height="40" rx="9" fill="#edf8ef" stroke="#7aaa82"/><text x="190" y="626" font-size="15">Recover with hysteresis</text>
+  </g>
+</svg>

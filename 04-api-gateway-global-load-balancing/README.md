@@ -181,15 +181,9 @@ Load shedding must reduce work. An unbounded payment queue relocates overload an
 
 ## Reliability & Failure Modes
 
-```mermaid
-flowchart TD
-    F[Failure threshold reached] --> R{Eligible target ready?}
-    R -->|No| S[Degrade or reject safely]
-    R -->|Yes| A[Admit within spare capacity]
-    A --> T[Shift new traffic]
-    T --> O[Observe health and impact]
-    O --> B[Recover with hysteresis]
-```
+![Regional failover decision and recovery flow](assets/failover-flow.svg)
+
+[Open the scalable diagram](assets/failover-flow.svg)
 
 **Failover sequence:** detect sustained failure → evaluate approved target health, capacity, identity/certificates and data readiness → apply routing policy → serve through the target regional LB and gateway fleet. DNS updates apply only to DNS steering; global proxies can change backend selection separately. Predetermined thresholds must bound the decision; do not wait indefinitely to discover every in-flight operation.
 
@@ -223,16 +217,9 @@ For `POST /accounts/123/payments`, a token with `payments:create` does not autho
 
 ## Configuration Safety
 
-```mermaid
-flowchart TD
-    C[Config change] --> V[Schema and static checks]
-    V --> N[Versioned candidate]
-    N --> K[Canary]
-    K --> O{Checks pass?}
-    O -->|Yes| P[Progressive rollout]
-    O -->|No| R[Last-known-good]
-    P -.-> R
-```
+![Safe configuration validation, canary, rollout and rollback flow](assets/config-safety.svg)
+
+[Open the scalable diagram](assets/config-safety.svg)
 
 Schema validation checks structure, fields and types. Static validation checks route syntax, service/policy/certificate references, allowed quota ranges and conflicting routes. A structurally valid `/payments → MarketingService` mapping still needs semantic checks against the intended API contract; schema validation cannot establish business correctness.
 
@@ -285,14 +272,9 @@ The explicitly completed adversarial sequence covered double balancing, cross-re
 
 **Selected:** telemetry feeds asynchronous anomaly detection, regional saturation forecasting, attack-pattern analysis and configuration-risk scoring. AI produces a recommendation with confidence/risk context; deterministic policy governs any routing change.
 
-```mermaid
-flowchart TD
-    T[Telemetry] --> A[Async AI analysis]
-    A --> R[Recommendation and risk]
-    R --> P[Deterministic policy checks]
-    P --> G[Risk-based approval]
-    G --> C[Canary and observe]
-```
+![Asynchronous AI recommendation and governed rollout flow](assets/ai-intersection.svg)
+
+[Open the scalable diagram](assets/ai-intersection.svg)
 
 For “Canada may exceed safe capacity in 15 minutes; shift 20% of eligible traffic to US,” first validate current health, US spare capacity, residency, tenant restrictions and change bounds. Low-risk changes may use preapproved automated guardrails; higher-risk changes require an on-call engineer or incident commander. Material business/regulatory impact may require formal or executive approval. Routine recommendations do not all need executives.
 
@@ -315,17 +297,9 @@ Workstreams describe deliverable outcomes; development teams, InfoSec and networ
 
 ### Critical path and dependencies
 
-```mermaid
-flowchart TD
-    G[Global traffic foundation] --> R[Regional gateway platform]
-    R --> S[Security integration]
-    S --> A[First application slice]
-    A --> P[Performance validation]
-    A --> F[Regional failover validation]
-    P --> L[Launch gates]
-    F --> L
-    L --> O[Production rollout]
-```
+![TPM critical path from global traffic foundation to production rollout](assets/critical-path.svg)
+
+[Open the scalable diagram](assets/critical-path.svg)
 
 The initial dependency model was global traffic → regional platform → security → onboarding → performance/failover → InfoSec and SRE readiness → rollout. Performance and failover can run in parallel once meaningful integration exists; InfoSec and SRE readiness can overlap but both gate launch. Workstreams may start earlier in parallel: arrows describe readiness dependencies, not a ban on overlapping development.
 

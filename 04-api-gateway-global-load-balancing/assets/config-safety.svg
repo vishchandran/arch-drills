@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="700" viewBox="0 0 380 700" role="img" aria-labelledby="title desc">
+  <title id="title">Safe configuration rollout</title>
+  <desc id="desc">Validate a configuration change, version it, canary it, then progressively roll it out when checks pass or restore the last-known-good version when they fail.</desc>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#49647a"/></marker></defs>
+  <rect width="380" height="700" rx="12" fill="#fff"/>
+  <text x="190" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#18364b">Safe configuration rollout</text>
+  <g font-family="Arial,sans-serif" text-anchor="middle" fill="#18364b">
+    <rect x="30" y="55" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="87" font-size="15">Configuration change</text>
+    <path d="M190 109v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="140" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="172" font-size="15">Schema and static checks</text>
+    <path d="M190 194v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="225" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="257" font-size="15">Versioned candidate</text>
+    <path d="M190 279v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="310" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="342" font-size="15">Canary and observe</text>
+    <path d="M190 364v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <path d="M190 395l130 60-130 60-130-60z" fill="#fff6df" stroke="#c79d42"/><text x="190" y="460" font-size="15">Checks pass?</text>
+    <path d="M60 455H25v80" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/><text x="40" y="445" font-size="13">No</text>
+    <rect x="30" y="542" width="320" height="54" rx="9" fill="#fdeeee" stroke="#c78585"/><text x="190" y="574" font-size="15">Restore last-known-good</text>
+    <path d="M320 455h35v165H190v25" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/><text x="340" y="445" font-size="13">Yes</text>
+    <rect x="30" y="650" width="320" height="40" rx="9" fill="#edf8ef" stroke="#7aaa82"/><text x="190" y="676" font-size="15">Progressive rollout</text>
+  </g>
+</svg>

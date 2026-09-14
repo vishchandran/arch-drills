@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="760" viewBox="0 0 380 760" role="img" aria-labelledby="title desc">
+  <title id="title">TPM critical path</title>
+  <desc id="desc">Global traffic foundation leads to the regional gateway platform, security integration, and first application slice. Performance and regional failover validation then converge at launch gates before production rollout.</desc>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#49647a"/></marker></defs>
+  <rect width="380" height="760" rx="12" fill="#fff"/>
+  <text x="190" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#18364b">TPM critical path</text>
+  <g font-family="Arial,sans-serif" text-anchor="middle" fill="#18364b">
+    <rect x="30" y="55" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="87" font-size="15">Global traffic foundation</text>
+    <path d="M190 109v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="140" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="172" font-size="15">Regional gateway platform</text>
+    <path d="M190 194v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="225" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="257" font-size="15">Security integration</text>
+    <path d="M190 279v25" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="310" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="342" font-size="15">First application slice</text>
+    <path d="M190 364v25M190 389H95v25M190 389h95v25" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="15" y="420" width="160" height="72" rx="9" fill="#fff6df" stroke="#c79d42"/><text x="95" y="451" font-size="14">Performance</text><text x="95" y="472" font-size="14">validation</text>
+    <rect x="205" y="420" width="160" height="72" rx="9" fill="#fff6df" stroke="#c79d42"/><text x="285" y="451" font-size="14">Regional failover</text><text x="285" y="472" font-size="14">validation</text>
+    <path d="M95 492v45h95M285 492v45h-95v25" fill="none" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="568" width="320" height="54" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="600" font-size="15">Mandatory launch gates</text>
+    <path d="M190 622v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="657" width="320" height="58" rx="9" fill="#edf8ef" stroke="#7aaa82"/><text x="190" y="692" font-size="15">Production rollout</text>
+  </g>
+</svg>

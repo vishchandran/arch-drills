@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="570" viewBox="0 0 380 570" role="img" aria-labelledby="title desc">
+  <title id="title">Governed AI recommendation flow</title>
+  <desc id="desc">Telemetry feeds asynchronous AI analysis, which produces a recommendation and risk score. Deterministic policy and risk-based approval govern a canary rollout.</desc>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#49647a"/></marker></defs>
+  <rect width="380" height="570" rx="12" fill="#fff"/>
+  <text x="190" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#18364b">Governed AI recommendation</text>
+  <g font-family="Arial,sans-serif" text-anchor="middle" fill="#18364b">
+    <rect x="30" y="55" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="90" font-size="15">Telemetry</text>
+    <path d="M190 113v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="148" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="183" font-size="15">Asynchronous AI analysis</text>
+    <path d="M190 206v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="241" width="320" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="190" y="276" font-size="15">Recommendation and risk score</text>
+    <path d="M190 299v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="334" width="320" height="58" rx="9" fill="#fff6df" stroke="#c79d42"/><text x="190" y="369" font-size="15">Deterministic policy checks</text>
+    <path d="M190 392v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="427" width="320" height="58" rx="9" fill="#fff6df" stroke="#c79d42"/><text x="190" y="462" font-size="15">Risk-based approval</text>
+    <path d="M190 485v28" stroke="#49647a" stroke-width="2" marker-end="url(#a)"/>
+    <rect x="30" y="520" width="320" height="40" rx="9" fill="#edf8ef" stroke="#7aaa82"/><text x="190" y="546" font-size="15">Canary and observe</text>
+  </g>
+</svg>
