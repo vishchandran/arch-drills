@@ -416,4 +416,4 @@ The baseline phased order is **Canada → US → Europe**; if Europe is delayed,
 
 ---
 
-**Chapter provenance:** Completed Topic 4 API Gateway + Global Load Balancing drill, including accepted/rejected choices, corrections, architecture mutations, adversarial review, AI intersection, TPM delivery and final E2E review. The opening brief supplies readiness requirements; unanswered scenarios, delivery synthesis, production clarifications and unresolved contracts are labeled explicitly. Previous: [Topic 3 — Rate Limiter](../03-rate-limiter/README.md). Next: [Topic 5 — Service Mesh & Service Discovery](../05-service-mesh-service-discovery/README.md).
+**Chapter provenance:** Completed Topic 4 API Gateway + Global Load Balancing drill, including accepted/rejected choices, corrections, architecture mutations, adversarial review, AI intersection, TPM delivery and final E2E review. The opening brief supplies readiness requirements; unanswered scenarios, delivery synthesis, production clarifications and unresolved contracts are labeled explicitly. Previous: [Topic 3 — Rate Limiter](../03-rate-limiter/README.md).
