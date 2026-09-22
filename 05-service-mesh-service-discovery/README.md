@@ -4,9 +4,9 @@
 
 **Status:** Complete
 
-A banking platform with 200 services is the vehicle for learning dynamic discovery, internal load balancing, consistent service-to-service policy, failure containment, and safe platform delivery. The selected architecture separates **registry and discovery → locality-aware instance selection → distributed mesh data plane → mesh control plane**. Applications retain business logic; proxies enforce networking policy locally; control-plane failure does not immediately stop healthy traffic.
+A banking platform with 200 services requires dynamic discovery, internal load balancing, consistent service-to-service policy, failure containment, and controlled platform delivery. The architecture separates **registry and discovery → locality-aware instance selection → distributed mesh data plane → mesh control plane**. Applications retain domain logic, proxies enforce networking policy locally, and a control-plane failure does not immediately stop healthy traffic.
 
-The mesh is justified by standardized workload identity, mutual TLS (mTLS), authorization, resilience, traffic management, and telemetry—not by service count alone. If those requirements disappear, the simpler discovery plus internal-load-balancing design is preferred. Numerical examples are teaching scenarios, not measured production thresholds.
+The mesh is justified by standardized workload identity, mutual TLS (mTLS), authorization, resilience, traffic management, and telemetry. Service count alone is not sufficient justification. If these cross-cutting requirements disappear, service discovery and internal load balancing provide the preferred simpler design. Numerical values in this document are illustrative planning scenarios rather than measured production thresholds.
 
 ## Contents
 
@@ -32,8 +32,8 @@ The mesh is justified by standardized workload identity, mutual TLS (mTLS), auth
 - [TPM Constraint Mutations](#tpm-constraint-mutations)
 - [Production Readiness](#production-readiness)
 - [Rollout & Rollback](#rollout--rollback)
-- [Concepts Learned](#concepts-learned)
-- [Mental Models](#mental-models)
+- [Architecture Reference](#architecture-reference)
+- [Operating Principles](#operating-principles)
 
 ## Problem & Requirements
 
@@ -55,26 +55,15 @@ Payment must call Fraud and Ledger without hard-coded addresses. Instances scale
 
 ## Final Architecture
 
-```mermaid
-flowchart LR
-    Pay[Payment] --> PP[Payment proxy]
-    PP --> FP[Fraud proxy]
-    FP --> Fraud[Fraud]
-    Reg[Registry] --> DS[Discovery state]
-    DS -. endpoints .-> PP
-    CP[Mesh control plane] -. policy .-> PP
-    CP -. policy .-> FP
-```
+![Service-to-service runtime architecture](assets/runtime-architecture.svg)
+
+[Open the scalable runtime architecture](assets/runtime-architecture.svg)
 
 The caller-side proxy selects a ready endpoint, establishes mTLS, enforces authorization and resilience policy, and emits telemetry. The destination proxy authenticates and authorizes the workload before forwarding. Registry and control plane update local state outside the synchronous request path.
 
-```mermaid
-flowchart TB
-    CP[Control plane: desired policy] --> CA[Canada data plane]
-    CP --> US[US data plane]
-    CA --> CAS[Canada services]
-    US --> USS[US services]
-```
+![Regional control and data planes](assets/regional-autonomy.svg)
+
+[Open the scalable regional autonomy diagram](assets/regional-autonomy.svg)
 
 Each regional data plane continues with safe LKG configuration if the control plane is unavailable. Regional serving must not require a cross-region management call.
 
@@ -119,16 +108,9 @@ Each regional data plane continues with safe LKG configuration if the control pl
 
 ## Service Registry & Discovery
 
-```mermaid
-flowchart LR
-    Start[Start] --> Reg[Register]
-    Reg --> Ready{Ready?}
-    Ready -- no --> Wait[Known, not eligible]
-    Ready -- yes --> Serve[Discoverable]
-    Serve --> Drain[Readiness false; drain]
-    Drain --> Dereg[Deregister]
-    Dereg --> Stop[Terminate]
-```
+![Service instance lifecycle](assets/instance-lifecycle.svg)
+
+[Open the scalable instance lifecycle](assets/instance-lifecycle.svg)
 
 A record includes workload identity, instance ID, address/port, AZ/region, readiness, and version metadata. A crashed instance cannot deregister itself: health checks, heartbeats/leases, and TTL expiry remove it from the eligible set. A slow instance returning HTTP 200 may remain registered while the balancing layer reduces or ejects it.
 
@@ -175,14 +157,9 @@ For a high-value payment whose required Fraud decision is unavailable, **fail cl
 
 ## Security
 
-```mermaid
-flowchart LR
-    ID[Payment identity] --> TLS[mTLS]
-    TLS --> AN[Authenticate]
-    AN --> AZ{Authorized?}
-    AZ -- yes --> Op[Forward]
-    AZ -- no --> Deny[Deny]
-```
+![Workload identity and authorization flow](assets/workload-security.svg)
+
+[Open the scalable workload security diagram](assets/workload-security.svg)
 
 - **Workload identity:** which service is calling, independent of IP.
 - **mTLS:** encryption plus mutual authentication; it does not grant permission.
@@ -194,14 +171,9 @@ Monitor issuance, installation, expiry margin, rotation failures, trust versions
 
 ## Configuration Safety
 
-```mermaid
-flowchart LR
-    Draft[Versioned draft] --> Valid[Validate and test]
-    Valid --> Can[Canary]
-    Can --> Healthy{Healthy?}
-    Healthy -- yes --> Expand[Progressive rollout]
-    Healthy -- no --> LKG[Restore LKG]
-```
+![Safe configuration delivery](assets/configuration-safety.svg)
+
+[Open the scalable configuration safety diagram](assets/configuration-safety.svg)
 
 Immutable versions support deterministic rollback, audit, drift detection, and reconciliation. Validation must test critical permitted paths such as `Payment → Ledger`; valid syntax cannot prove business safety. Canary by cohort and region, observe denials and customer outcomes, then expand. Avoid simultaneous global changes.
 
@@ -234,12 +206,9 @@ Metrics answer **is something wrong?** Logs answer **what happened?** Traces ans
 
 ## Multi-AZ & Multi-Region
 
-```mermaid
-flowchart LR
-    P[Payment CA-AZ1] --> F1[Fraud CA-AZ1]
-    P -. local degraded .-> F2[Fraud CA-AZ2]
-    P -. explicit failover .-> F3[Fraud US]
-```
+![Locality-aware routing and failover](assets/locality-routing.svg)
+
+[Open the scalable locality routing diagram](assets/locality-routing.svg)
 
 Prefer local traffic while healthy and performant. Test cross-AZ connectivity with probes and controlled exercises rather than forcing every request across AZs. Two AZs at 60% each cannot absorb all traffic in one AZ without roughly 120% demand. Reserve headroom, enforce admission/concurrency limits, and shed lower-priority work to preserve critical transactions.
 
@@ -264,27 +233,22 @@ Normal Canadian transactions use Canadian Fraud and Ledger. A synchronous US dep
 
 | Challenge | Outcome retained |
 |---|---|
-| “200 services means mesh.” | Rejected. For discovery, LB, basic timeout, existing TLS, and observability, simpler platform capabilities suffice. |
-| “Retry in Payment and mesh.” | Rejected. Conflicting deadlines and nested retries obscure and amplify behavior. |
-| “100 ms is resilient when Fraud p99 is 180 ms.” | Rejected. It converts normal tails into failure load. |
-| “Put payments over $10,000 screening in the mesh.” | Rejected. It is application/domain logic. |
-| “Mesh replaces gateway edge controls.” | Rejected. Gateway owns north-south API protection; mesh owns east-west workload traffic. |
-| “Force AZ1 traffic to AZ2 to test resilience.” | Rejected. Prefer local healthy capacity; test through probes and exercises. |
-| “Very short certificates are always safer.” | Incomplete. Balance exposure with rotation availability; automate early overlap and monitor. |
-| “Keep every built component.” | Rejected. Remove the mesh if advanced identity/authz, resilience, and traffic needs disappear. |
+| Mesh selected solely because the platform has 200 services | Rejected. For discovery, LB, basic timeout, existing TLS, and observability, simpler platform capabilities suffice. |
+| Retries configured independently in Payment and the mesh | Rejected. Conflicting deadlines and nested retries obscure and amplify behavior. |
+| A 100 ms timeout with Fraud p99 at 180 ms | Rejected. It converts normal tail latency into failure load. |
+| Enhanced screening rules implemented in the mesh | Rejected. Payment thresholds and screening decisions are application and domain logic. |
+| Gateway edge controls moved into the mesh | Rejected. The gateway owns north-south API protection; the mesh owns east-west workload traffic. |
+| Every AZ1 request forced through AZ2 | Rejected. Prefer local healthy capacity and test cross-AZ resilience through probes and controlled exercises. |
+| Extremely short certificate lifetimes | Refined. Balance credential exposure with rotation availability; rotate early with overlap and continuous monitoring. |
+| All deployed components retained indefinitely | Rejected. Remove the mesh if advanced identity, authorization, resilience, and traffic-management requirements disappear. |
 
 Every component must earn its place. Registry/discovery handles ephemeral endpoints; internal LB selects; the mesh earns its cost only from required cross-cutting controls; observability makes that extra layer supportable.
 
 ## AI Intersection
 
-```mermaid
-flowchart LR
-    T[Metrics, logs, traces] --> AI[Async AI analysis]
-    AI --> S[Prediction or recommendation]
-    S --> G[Deterministic validation]
-    G --> R[Risk-based review]
-    R --> C[Canary and observe]
-```
+![Governed asynchronous AI analysis](assets/ai-governance.svg)
+
+[Open the scalable AI governance diagram](assets/ai-governance.svg)
 
 Use asynchronous AI for anomaly detection and prediction: emerging retry storms, saturation, certificate-rotation clusters, abnormal dependency behavior, and forecast error-budget exhaustion. Deterministic monitoring already measures latency and current budgets; AI adds correlation, pattern recognition, and forecasting.
 
@@ -306,18 +270,9 @@ Reject AI in each Payment request to select Fraud. It adds latency, nondetermini
 
 ### Critical path and dependencies
 
-```mermaid
-flowchart LR
-    D[Discovery] --> M[Mesh]
-    M --> I[Identity and mTLS]
-    I --> P[Pilot onboarding]
-    P --> T[Integration and resilience]
-    P --> S[Security approval]
-    P --> O[Operational readiness]
-    T --> G[Go or No-Go]
-    S --> G
-    O --> G
-```
+![Delivery critical path](assets/delivery-critical-path.svg)
+
+[Open the scalable delivery critical path](assets/delivery-critical-path.svg)
 
 Security architecture and operational work start early even though final approvals gate launch. Application assessment, dependency mapping, telemetry, test design, runbooks, manifests, and lower-environment work can continue during a six-week platform delay. Final mesh integration, mTLS validation, performance/resilience certification, and production onboarding wait for platform readiness.
 
@@ -333,7 +288,7 @@ Security architecture and operational work start early even though final approva
 | Platform delay blocks onboarding | Dependency/schedule risk | Track required-by dates, prepare teams in parallel; phase/rebaseline at latest safe integration date; TPM/platform. |
 | Mesh is hard to troubleshoot | Readiness issue if unresolved | Layer dashboards, traces, runbooks, simulation; trigger L1/L2 cannot isolate faults; delay pilot; SRE/platform. |
 
-Mitigation reduces probability or impact before occurrence; contingency executes after the trigger. “Fix forward on the go” is inadequate for security-critical certificate rotation.
+Mitigation reduces probability or impact before occurrence; contingency executes after the trigger. An undefined fix-forward approach is inadequate for security-critical certificate rotation.
 
 ## TPM Constraint Mutations
 
@@ -378,7 +333,7 @@ Use **lower-environment validation → representative low-risk pilot → 1% → 
 
 Policy, application, certificate/trust, and traffic rollback are distinct operations. Shadow traffic must suppress writes. Blue/green rollback works only while the old environment and contracts remain compatible.
 
-## Concepts Learned
+## Architecture Reference
 
 | Concept | Working meaning / correction |
 |---|---|
@@ -395,7 +350,7 @@ Policy, application, certificate/trust, and traffic rollback are distinct operat
 | SLO / error budget | Reliability target / allowed miss over its window. |
 | Canary / blue-green / shadow | Progressive exposure / environment switch / non-authoritative copy. |
 
-## Mental Models
+## Operating Principles
 
 - Discovery answers **where**; load balancing answers **which one**; mesh governs **how service traffic behaves**.
 - Application = domain logic; control plane = desired rules; data plane = runtime enforcement.
@@ -413,4 +368,4 @@ Policy, application, certificate/trust, and traffic rollback are distinct operat
 
 ---
 
-**Chapter provenance:** Completed Topic 5 Service Mesh + Service Discovery drill, including accepted/rejected decisions, refinements, constraint mutations, adversarial review, AI intersection, TPM delivery, production-readiness gates, and final E2E review. Requirements and numerical scenarios are learning assumptions; implementation thresholds and sign-offs remain to be assigned. Previous: [Topic 4 — API Gateway + Global Load Balancing](../04-api-gateway-global-load-balancing/README.md).
+**Design basis:** Topic 5 Service Mesh + Service Discovery architecture review, including accepted and rejected decisions, constraint mutations, adversarial review, AI integration, TPM delivery, production-readiness gates, and end-to-end validation. Requirements and numerical scenarios are planning assumptions; implementation thresholds and formal sign-offs remain to be assigned. Previous: [Topic 4 — API Gateway + Global Load Balancing](../04-api-gateway-global-load-balancing/README.md).
