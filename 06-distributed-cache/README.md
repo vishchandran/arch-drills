@@ -1,6 +1,6 @@
 # Topic 6 — Distributed Cache
 
-[Back to Architecture Drills](../Main%20Readme.md)
+[Back to Architecture Drills](../README.md)
 
 **Status:** Complete
 

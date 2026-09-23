@@ -1,6 +1,6 @@
 # Topic 5 — Service Mesh + Service Discovery
 
-[Back to Architecture Drills](../Main%20Readme.md)
+[Back to Architecture Drills](../README.md)
 
 **Status:** Complete
 
