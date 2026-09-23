@@ -51,45 +51,25 @@ At 20,000 requests/second and 95% hits, approximately **1,000 reads/second** mis
 
 ### Product read path
 
-```mermaid
-flowchart TD
-    C[Client] --> S[Product Service]
-    S --> R[Redis lookup]
-    R --> H{Usable hit?}
-    H -->|Yes| O[Return product]
-    H -->|No or timeout| G[Bounded fallback]
-    G --> D[DB or qualified read replica]
-    D --> V[Product result]
-    V --> O
-    V -. Async population .-> P[Version check and TTL]
-    P --> R
-```
+![Product cache-aside read path](assets/product-read-path.svg)
+
+[Open the scalable product read-path diagram](assets/product-read-path.svg)
 
 “Usable” includes freshness and schema checks. The service owns DB access; Redis does not load missing products itself. The DB response can reach the client before cache population finishes.
 
 ### Committed change propagation
 
-```mermaid
-flowchart TD
-    W[Product write] --> D[Authoritative DB commit]
-    D --> C[Change data capture]
-    C --> E[Durable event transport]
-    E --> V[Cache consumer validates event]
-    V --> U[Atomic version check and update]
-    U --> R[Redis primary with TTL]
-    R -. Async replication .-> P[Shard replica]
-```
+![Committed product change propagation](assets/committed-change-propagation.svg)
+
+[Open the scalable change-propagation diagram](assets/committed-change-propagation.svg)
 
 The consumer, not Redis Cluster, subscribes to events. Updating a complete product projection is the selected path; invalidation remains appropriate when an event cannot safely reconstruct it.
 
 ### Critical balance boundary
 
-```mermaid
-flowchart TD
-    C[Available balance request] --> S[Balance Service]
-    S --> D[Authoritative consistent store]
-    D --> R[Balance response]
-```
+![Critical available-balance path](assets/critical-balance-boundary.svg)
+
+[Open the scalable balance-boundary diagram](assets/critical-balance-boundary.svg)
 
 Money-movement correctness also requires authoritative transactional checks; a prior balance read is not a reservation of funds.
 
@@ -159,16 +139,9 @@ DB-first asynchronous cache propagation is **not write-behind**. Async miss popu
 
 Redis Cluster uses **16,384 fixed hash slots**: `CRC16(key) % 16384`, with hash-tag handling when present. A key maps to a slot; the cluster-aware client routes to its current primary. Rebalancing moves slots and their keys, without changing the fixed key-to-slot function. This differs from a classic consistent-hashing ring and from `hash(key) % node_count`. [Redis Cluster specification](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/).
 
-```mermaid
-flowchart TD
-    C[Cluster-aware client] --> K[Key to fixed hash slot]
-    K --> A[Primary A: slot range A]
-    K --> B[Primary B: slot range B]
-    K --> C2[Primary C: slot range C]
-    A -. Copy .-> AR[Replica A]
-    B -. Copy .-> BR[Replica B]
-    C2 -. Copy .-> CR[Replica C]
-```
+![Redis Cluster hash-slot routing and replication](assets/redis-cluster-slots.svg)
+
+[Open the scalable Redis Cluster diagram](assets/redis-cluster-slots.svg)
 
 - **Sharding:** split keys, memory, and aggregate load. A single hot key still belongs to one primary.
 - **Replication:** copy the same shard for failover and optional read offload; does not distribute primary writes or guarantee zero lag.
@@ -227,14 +200,9 @@ Use heartbeats or source watermarks to distinguish an idle product stream from a
 | Business demands zero stale data | Revisit the read architecture and authoritative store; shorter TTL or faster CDC does not prove strong consistency. |
 | **Two regions; freshness under 2 seconds** | Regional consumers update regional caches from committed changes; monitor end-to-end visibility and bypass when freshness cannot be established. |
 
-```mermaid
-flowchart TD
-    D[Authoritative DB commit] --> C[CDC and durable events]
-    C --> A[Region A consumer]
-    C --> B[Region B consumer]
-    A --> RA[Region A Redis]
-    B --> RB[Region B Redis]
-```
+![Cross-region cache freshness](assets/cross-region-freshness.svg)
+
+[Open the scalable cross-region freshness diagram](assets/cross-region-freshness.svg)
 
 For the two-region mutation, budget **capture + transport + queueing + apply + any replica/local-cache delay** below two seconds. Use per-entity versions and verify both regions, including failure recovery. TTL alone is insufficient. If freshness is unknown or breaches the bound, use a qualified source under admission limits; if no source meets the requirement, return controlled unavailability. A partition cannot guarantee both fresh reads and uninterrupted serving. Regional ownership, residency, and exact measurement/alert margins must be finalized before launch.
 

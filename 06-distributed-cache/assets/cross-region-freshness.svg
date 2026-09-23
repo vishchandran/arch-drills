@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="620" viewBox="0 0 420 620" role="img" aria-labelledby="title desc">
+  <title id="title">Cross-region cache freshness</title>
+  <desc id="desc">An authoritative database commit enters change data capture and durable event transport. Regional consumers independently validate and update Redis in regions A and B. The total commit-to-visible time in each region must remain below two seconds.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}</style></defs>
+  <rect width="420" height="620" rx="12" fill="#fff"/><text class="t" x="210" y="31" font-size="18" font-weight="700">Cross-region cache freshness</text>
+  <g class="t"><rect class="b" x="45" y="55" width="330" height="66" rx="9" fill="#f2edfb" stroke="#9982bd"/><text x="210" y="84" font-size="16" font-weight="700">Authoritative DB commit</text><text x="210" y="106" font-size="12">source timestamp + entity version</text><path class="l" d="M210 121v28"/>
+  <rect class="b" x="45" y="156" width="330" height="66" rx="9" fill="#fff5df" stroke="#c8a85a"/><text x="210" y="185" font-size="16" font-weight="700">CDC + durable events</text><text x="210" y="207" font-size="12">ordered and replayable per entity</text>
+  <path class="l" d="M210 222v40H110v39"/><path class="l" d="M210 262h100v39"/>
+  <rect class="b" x="22" y="308" width="176" height="72" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="110" y="337" font-size="15" font-weight="700">Region A consumer</text><text x="110" y="361" font-size="12">validate + version check</text>
+  <rect class="b" x="222" y="308" width="176" height="72" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="310" y="337" font-size="15" font-weight="700">Region B consumer</text><text x="310" y="361" font-size="12">validate + version check</text>
+  <path class="l" d="M110 380v39"/><path class="l" d="M310 380v39"/>
+  <rect class="b" x="22" y="426" width="176" height="62" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="110" y="463" font-size="15">Region A Redis</text>
+  <rect class="b" x="222" y="426" width="176" height="62" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="310" y="463" font-size="15">Region B Redis</text>
+  <rect class="b" x="34" y="535" width="352" height="58" rx="9" fill="#fff5df" stroke="#c8a85a"/><text x="210" y="559" font-size="14" font-weight="700">Commit → visible in each region &lt; 2 seconds</text><text x="210" y="580" font-size="12">otherwise controlled bypass or unavailability</text></g>
+</svg>

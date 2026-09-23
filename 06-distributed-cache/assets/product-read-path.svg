@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="790" viewBox="0 0 420 790" role="img" aria-labelledby="title desc">
+  <title id="title">Product cache-aside read path</title>
+  <desc id="desc">A client calls Product Service, which checks Redis. A usable cache hit returns immediately. A miss or timeout uses bounded database fallback, returns the product, and asynchronously repopulates Redis after a version and TTL check.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker>
+    <style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.box{stroke-width:1.5}.line{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.dash{stroke-dasharray:6 5}</style>
+  </defs>
+  <rect width="420" height="790" rx="12" fill="#fff"/>
+  <text class="t" x="210" y="31" font-size="18" font-weight="700">Product cache-aside read path</text>
+  <g class="t">
+    <rect class="box" x="55" y="54" width="310" height="56" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="210" y="88" font-size="16">Client</text>
+    <path class="line" d="M210 110v28"/>
+    <rect class="box" x="55" y="145" width="310" height="62" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="210" y="182" font-size="16" font-weight="700">Product Service</text>
+    <path class="line" d="M210 207v28"/>
+    <rect class="box" x="55" y="242" width="310" height="62" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="210" y="279" font-size="16">Redis lookup</text>
+    <path class="line" d="M210 304v28"/>
+    <path d="M210 335l92 57-92 57-92-57Z" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/><text x="210" y="388" font-size="15" font-weight="700">Usable hit?</text>
+    <text x="210" y="408" font-size="12">fresh and valid</text>
+    <path class="line" d="M302 392h48v83"/><text x="340" y="378" font-size="12">Yes</text>
+    <rect class="box" x="228" y="482" width="166" height="58" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="311" y="516" font-size="15">Return product</text>
+    <path class="line" d="M118 392H70v83"/><text x="78" y="378" font-size="12">No / timeout</text>
+    <rect class="box" x="26" y="482" width="166" height="58" rx="9" fill="#fff5df" stroke="#c8a85a"/><text x="109" y="507" font-size="15" font-weight="700">Bounded fallback</text><text x="109" y="527" font-size="12">admission limits</text>
+    <path class="line" d="M109 540v25"/>
+    <rect class="box" x="26" y="572" width="166" height="66" rx="9" fill="#f2edfb" stroke="#9982bd"/><text x="109" y="601" font-size="15" font-weight="700">Authoritative DB</text><text x="109" y="622" font-size="12">or qualified replica</text>
+    <path class="line" d="M109 638v25"/>
+    <rect class="box" x="26" y="670" width="166" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="109" y="695" font-size="15">Return product</text><text x="109" y="716" font-size="12">from authoritative result</text>
+    <path class="line dash" d="M109 728v32H10V273h45"/><text x="245" y="755" font-size="12">Async fill: version check + TTL</text>
+  </g>
+</svg>

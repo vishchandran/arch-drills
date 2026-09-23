@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="710" viewBox="0 0 420 710" role="img" aria-labelledby="title desc">
+  <title id="title">Redis Cluster hash-slot routing and replication</title>
+  <desc id="desc">A cluster-aware client hashes each key to one of 16,384 fixed slots. Slot ownership routes the request to one of three primaries. Each primary asynchronously copies its shard to a replica.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
+  <rect width="420" height="710" rx="12" fill="#fff"/><text class="t" x="210" y="31" font-size="18" font-weight="700">Redis Cluster: slots and replicas</text>
+  <g class="t"><rect class="b" x="45" y="55" width="330" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="210" y="90" font-size="16">Cluster-aware client</text><path class="l" d="M210 113v28"/>
+  <rect class="b" x="45" y="148" width="330" height="72" rx="9" fill="#fff5df" stroke="#c8a85a"/><text x="210" y="178" font-size="16" font-weight="700">Key → fixed hash slot</text><text x="210" y="202" font-size="12">CRC16(key) mod 16,384</text>
+  <path class="l" d="M210 220v35H75v36"/><path class="l" d="M210 220v71"/><path class="l" d="M210 255h135v36"/>
+  <rect class="b" x="18" y="298" width="114" height="72" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="75" y="327" font-size="14" font-weight="700">Primary A</text><text x="75" y="350" font-size="12">slot range A</text>
+  <rect class="b" x="153" y="298" width="114" height="72" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="210" y="327" font-size="14" font-weight="700">Primary B</text><text x="210" y="350" font-size="12">slot range B</text>
+  <rect class="b" x="288" y="298" width="114" height="72" rx="9" fill="#e8f7f1" stroke="#72aa93"/><text x="345" y="327" font-size="14" font-weight="700">Primary C</text><text x="345" y="350" font-size="12">slot range C</text>
+  <path class="l d" d="M75 370v72"/><path class="l d" d="M210 370v72"/><path class="l d" d="M345 370v72"/><text x="210" y="410" font-size="12">asynchronous replication</text>
+  <rect class="b" x="18" y="449" width="114" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="75" y="483" font-size="14">Replica A</text>
+  <rect class="b" x="153" y="449" width="114" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="210" y="483" font-size="14">Replica B</text>
+  <rect class="b" x="288" y="449" width="114" height="58" rx="9" fill="#edf5fb" stroke="#8aaac2"/><text x="345" y="483" font-size="14">Replica C</text>
+  <rect class="b" x="28" y="562" width="364" height="102" rx="9" fill="#fff5df" stroke="#c8a85a"/><text x="210" y="591" font-size="14" font-weight="700">Key architectural boundary</text><text x="210" y="617" font-size="12">Sharding spreads different keys across primaries.</text><text x="210" y="638" font-size="12">One hot key still belongs to one primary.</text></g>
+</svg>
