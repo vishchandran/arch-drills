@@ -8,6 +8,8 @@ A banking API is the vehicle for learning fair admission, burst control, atomic 
 
 The drill evolved from per-request shared counters to asynchronous quota replenishment. Service-level concurrency and capacity controls remain necessary. Decisions, rejected proposals, and corrections are retained below; numerical scenarios are teaching assumptions, not measured production capacities.
 
+The architecture is organized by responsibility: the control plane defines and distributes policy, the gateway data plane makes fast local decisions, the regional allocator coordinates shared quota outside the normal request path, and banking services enforce downstream safety. Exact vendors, SLOs, lease durations, regional recovery objectives, and named owners remain implementation decisions.
+
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
@@ -27,6 +29,8 @@ The drill evolved from per-request shared counters to asynchronous quota repleni
 - [TPM Delivery](#tpm-delivery)
 - [Program Risks](#program-risks)
 - [TPM Constraint Mutations](#tpm-constraint-mutations)
+- [Production Readiness](#production-readiness)
+- [Rollout & Rollback](#rollout--rollback)
 - [Concepts Learned](#concepts-learned)
 - [Mental Models](#mental-models)
 
@@ -34,24 +38,48 @@ The drill evolved from per-request shared counters to asynchronous quota repleni
 
 Protect `GET /accounts/{id}/balance` against runaway clients, bots, abuse, and unfair consumption without blocking legitimate corporate users. The service can handle aggregate traffic in the initial exercise; fairness and abuse protection motivate the limiter.
 
-| Requirement | Established in the drill | Consequence |
-|---|---|---|
-| Baseline | 8,000 RPS normal; 20,000 RPS peak; 12 gateways; 30 Balance Service instances | Enforce before downstream work; coordinate across gateways. |
-| Primary identity | Authenticated employee/user; example 120 requests/min total | One user cannot multiply quota by changing gateway or IP. |
-| Layered protection | IP as coarse abuse signal; account as broader ceiling; tenant/API key and endpoint policies | A global 20,000 RPS ceiling alone allows one customer to monopolize traffic. |
-| Legitimate sharing | Hundreds of employees can share an account; thousands can share a NAT/proxy IP | Neither account nor public IP is a reliable individual identity. |
-| Client response | Allow or reject; HTTP 429 on quota exhaustion | Supply Retry-After where meaningful; clients add jitter and progressive backoff. |
-| Latency mutation | Gateway overhead below 5 ms p95 while Redis reaches 25 ms p95 | Local decisions with early asynchronous replenishment. |
+| Requirement | Decision and consequence |
+|---|---|
+| Baseline | 8,000 RPS normal; 20,000 RPS peak; 12 gateways; 30 Balance Service instances<br>**Consequence:** Enforce before downstream work and coordinate quota across gateways. |
+| Primary identity | Authenticated employee/user; example 120 requests/min total<br>**Consequence:** One user cannot multiply quota by changing gateway or IP. |
+| Layered protection | IP as coarse abuse signal; account as broader ceiling; tenant/API key and endpoint policies<br>**Consequence:** A global 20,000 RPS ceiling alone allows one customer to monopolize traffic. |
+| Legitimate sharing | Hundreds of employees can share an account; thousands can share a NAT/proxy IP<br>**Consequence:** Neither account nor public IP is a reliable individual identity. |
+| Client response | Allow or reject; HTTP 429 on quota exhaustion<br>**Consequence:** Supply Retry-After where meaningful; clients add jitter and progressive backoff. |
+| Latency mutation | Gateway overhead below 5 ms p95 while Redis reaches 25 ms p95<br>**Consequence:** Decide locally and replenish quota asynchronously before exhaustion. |
 
 **Scope boundary.** Exact production quotas, SLOs, lease durations, clock tolerance, emergency budgets, Redis topology, durability policy, and regional recovery targets were not finalized. The later 10-gateway and 100,000 RPS scenarios change assumptions deliberately; they are not baseline forecasts. Authentication and payment correctness remain separate controls.
 
 ## Final Architecture
 
-![Local request decisions and asynchronous quota replenishment, with policy distribution outside the request path](assets/rate-architecture.svg)
+The diagrams separate request enforcement, failure behavior, and AI-governed policy changes so each view remains readable on GitHub web and mobile.
 
-[Open the scalable architecture diagram](assets/rate-architecture.svg)
+### Request path and quota replenishment
 
-The load balancer and gateway route requests. Redis coordinates quota ownership; it does not redirect traffic. The control plane is logically centralized and may be replicated. Policies and grants reach gateways outside the normal request path. A valid local grant permits consumption only while all applicable admission and downstream safety rules permit it.
+![Request path from client identity through local rate-limit enforcement to downstream services](assets/request-path.svg)
+
+[Open the scalable diagram](assets/request-path.svg)
+
+The load balancer and gateway route requests. The gateway evaluates cached policy and valid local quota without waiting for Redis. A valid grant permits consumption only while every applicable identity, tenant, endpoint and downstream safety rule allows it.
+
+### Quota allocation and policy distribution
+
+![Asynchronous quota replenishment and control-plane policy distribution](assets/quota-control-plane.svg)
+
+[Open the scalable diagram](assets/quota-control-plane.svg)
+
+Redis coordinates quota ownership; it does not redirect traffic. The control plane is logically centralized and may be replicated. Policies and grants reach gateways outside the normal request path. Gateways request more capacity before local quota is exhausted, and install only valid time-bounded grants.
+
+### Failure behavior
+
+![Failure response distinguishes policy outage, quota dependency failure, and expired grants](assets/failure-flow.svg)
+
+[Open the scalable diagram](assets/failure-flow.svg)
+
+Failure policy is endpoint-specific. Balance inquiry can tolerate temporary approximation; payment initiation needs bounded emergency capacity or rejection; login and OTP require trustworthy enforcement. Cached policy and valid quota ownership are separate: a control-plane outage does not extend an expired grant.
+
+### Control and data planes
+
+The **control plane** defines quotas, versions policies, allocates regional budgets, issues or renews grants, and governs rollout. The **data plane** receives policy, consumes locally granted capacity, and makes the per-request allow/reject decision. Redis is a regional coordination mechanism used by the control plane; it is not a request router.
 
 ## End-to-End Flow
 
@@ -66,42 +94,42 @@ The load balancer and gateway route requests. Redis coordinates quota ownership;
 
 ## Component Responsibilities
 
-| Component | Responsibility | Failure impact |
-|---|---|---|
-| Edge / load balancer | Coarse abuse checks and routing to healthy gateways | Entry-tier failure can block otherwise healthy services. |
-| Gateway data plane | Authenticate, apply cached policy, consume local quota, allow/reject, return 429 | Lost local state requires conservative grant recovery; independent full quotas over-admit. |
-| Control plane | Define quotas, publish/version policies, allocate regional budgets, issue/renew/revoke leases, audit and govern rollout | Cached policy can continue, but freshness and grant validity are separate concerns. |
-| Regional allocator / Redis | Atomic shared reservations and coordination state | Slowness impairs replenishment; state loss can invalidate quota accounting. |
-| Banking services | In-flight limits, load shedding, backpressure, circuit breakers | A customer within quota can still overload a slow dependency. |
-| Telemetry / asynchronous AI | Detect anomalies and recommend governed policy changes | Analysis can lag or stop without blocking requests. |
+| Component | Responsibility / boundary |
+|---|---|
+| Edge / load balancer | Coarse abuse checks and routing to healthy gateways<br>**Boundary:** Entry-tier failure can block otherwise healthy services. |
+| Gateway data plane | Authenticate, apply cached policy, consume local quota, allow/reject, return 429<br>**Boundary:** Lost local state requires conservative recovery; independent full quotas over-admit. |
+| Control plane | Define quotas, publish/version policies, allocate regional budgets, issue/renew/revoke leases, audit and govern rollout<br>**Boundary:** Cached policy can continue, but freshness and grant validity are separate concerns. |
+| Regional allocator / Redis | Reserve shared capacity atomically and hold coordination state<br>**Boundary:** Slowness impairs replenishment; state loss can invalidate accounting. Redis does not route requests. |
+| Banking services | Enforce in-flight limits, load shedding, backpressure and circuit breakers<br>**Boundary:** A customer within quota can still overload a slow dependency. |
+| Telemetry / asynchronous AI | Detect anomalies and recommend governed policy changes<br>**Boundary:** Analysis can lag or stop without blocking requests. |
 
 Policy distribution and lease issuance/renewal belong to the **control plane** in this drill. Receiving policies and consuming granted tokens belong to the **data plane**.
 
 ## Key Architecture Decisions
 
-| Decision / disposition | Why | Alternative and trade-off |
-|---|---|---|
-| **Accepted:** authenticated user first, layered limits | Preserves fairness across shared corporate networks/accounts | IP remains useful for abuse; a strict shared-IP quota can block healthy users. |
-| **Accepted:** gateway enforcement plus service protection | Reject early while protecting bypass/internal paths | Clients cannot be trusted to enforce their own quotas. |
-| **Rejected:** full policy independently on each gateway | 12 × 120/min admits 1,440/min; 10 buckets of burst 100/refill 20 permit burst 1,000 and 200 RPS | Allocate portions of the policy or coordinate shared state. |
-| **Baseline, then refined:** shared Redis per request | One logical counter closes the fleet-wide accounting gap | Network latency, availability coupling, operations per request, and hot keys motivate local grants. |
-| **Rejected:** GET → decide → INCR; polling who asked first | Concurrent callers can spend the same final slot | Atomic updates/reservations establish one allocation outcome. |
-| **Accepted:** guaranteed local quota + shared burst | Keeps normal requests local and helps busy gateways borrow | Static slices alone strand capacity; shared capacity is finite. |
-| **Rejected:** Redis redirects to quiet gateways | Quota coordination is distinct from request routing | Load balancer/gateway owns routing. |
-| **Accepted:** leases, expiry, renewal, versions/fencing | Limits stranded ownership and stale-grant use | Heartbeat loss alone does not prove the gateway is dead. |
-| **Rejected:** consistent hashing fixes one hot customer | One key still maps to one shard | Split bounded allocations; reduce coordination with local consumption. |
-| **Accepted:** regional quotas and cached policy | Low latency and regional independence | Fragmentation, stale policy, and explicit consistency trade-offs remain. |
-| **Rejected:** critical always means fail closed; AI decides requests | Endpoint risk differs; model calls add latency and nondeterminism | Govern fallback per endpoint and keep AI advisory. |
+| Decision / disposition | Rationale and trade-off |
+|---|---|
+| **Accepted:** authenticated user first, layered limits | Preserves fairness across shared corporate networks/accounts<br>**Trade-off:** IP remains useful for abuse, but a strict shared-IP quota can block healthy users. |
+| **Accepted:** gateway enforcement plus service protection | Rejects early while protecting bypass/internal paths<br>**Trade-off:** Clients cannot be trusted to enforce their own quotas. |
+| **Rejected:** full policy independently on each gateway | 12 × 120/min admits 1,440/min; ten burst-100/refill-20 buckets permit burst 1,000 and 200 RPS<br>**Alternative:** Allocate portions of the policy or coordinate shared state. |
+| **Baseline, then refined:** shared Redis per request | One logical counter closes the fleet-wide accounting gap<br>**Trade-off:** Network latency, availability coupling, operations per request and hot keys motivate local grants. |
+| **Rejected:** GET → decide → INCR; polling who asked first | Concurrent callers can spend the same final slot<br>**Alternative:** Atomic updates/reservations establish one allocation outcome. |
+| **Accepted:** guaranteed local quota + shared burst | Keeps normal requests local and helps busy gateways borrow<br>**Trade-off:** Static slices strand capacity; shared capacity remains finite. |
+| **Rejected:** Redis redirects to quiet gateways | Quota coordination is distinct from request routing<br>**Alternative:** Load balancer/gateway owns routing. |
+| **Accepted:** leases, expiry, renewal and fencing | Limits stranded ownership and stale-grant use<br>**Trade-off:** Heartbeat loss alone does not prove a gateway is dead. |
+| **Rejected:** consistent hashing fixes one hot customer | One key still maps to one shard<br>**Alternative:** Split bounded allocations and reduce coordination with local consumption. |
+| **Accepted:** regional quotas and cached policy | Supports low latency and regional independence<br>**Trade-off:** Fragmentation, stale policy and explicit consistency choices remain. |
+| **Rejected:** critical always means fail closed; AI decides requests | Endpoint risk differs; model calls add latency and nondeterminism<br>**Alternative:** Govern fallback per endpoint and keep AI advisory. |
 
 ## Algorithms
 
-| Algorithm | Mechanism / example | Selection and limit |
-|---|---|---|
-| Fixed Window | One counter per subject/rule/window; 120/min | Simple and cheap when boundary bursts are acceptable. 120 at 10:51:59 plus 120 at 10:52:01 admits 240 in about two seconds. |
-| Sliding Window Log | Store individual timestamps; remove entries older than the rolling window | Accurate but memory and cleanup intensive at 20,000 RPS. Not selected for the high-volume balance example. |
-| Sliding Window Counter | Current count + weighted previous count | Approximate and compact; selected where smoother rolling enforcement matters. High traffic alone does not mandate it. |
-| Token Bucket | Capacity **10 tokens**, refill **2 tokens/sec** | Selected for mobile balance traffic: allow ten immediately when full, then refill at the sustained rate. Capacity is a burst amount, not 130 requests/min. |
-| Leaky Bucket | Bounded queue drains at a controlled rate; ten arrivals released at 2/sec | Selected to smooth traffic into a legacy fraud service; reject/drop on queue overflow and bound waiting. The separate fraud example requires a smooth 2,000 RPS. |
+| Algorithm | Use and trade-off |
+|---|---|
+| Fixed Window | One counter per subject/rule/window; example 120/min<br>**Trade-off:** Simple and cheap, but 120 at 10:51:59 plus 120 at 10:52:01 admits 240 in about two seconds. |
+| Sliding Window Log | Store individual timestamps and remove entries outside the rolling window<br>**Trade-off:** Accurate but memory and cleanup intensive at 20,000 RPS. |
+| Sliding Window Counter | Combine current count with a weighted previous count<br>**Trade-off:** Compact and smoother at boundaries, but approximate. High traffic alone does not mandate it. |
+| Token Bucket | Capacity **10 tokens**, refill **2 tokens/sec** for the mobile-balance example<br>**Trade-off:** Allows ten immediately when full, then constrains sustained traffic. Capacity is a burst amount, not 130 requests/min. |
+| Leaky Bucket | Drain a bounded queue at a controlled rate; ten arrivals released at 2/sec<br>**Trade-off:** Smooths traffic into a legacy service, but adds queuing and must reject/drop when full. |
 
 **Sliding counter arithmetic.** With previous minute = 100 and current minute = 40, halfway through the current minute the estimate is `100 × 0.5 + 40 = 90`; a 120 limit leaves approximately 30 requests. At ten seconds into the minute, previous = 100 and current = 100 yields `100 × 50/60 + 100 ≈ 183`, so reject. Weighting estimates overlapping historical usage; it does not create a per-second allowance. Logs versus counters means individual timestamps versus aggregated totals, not milliseconds versus seconds.
 
@@ -134,21 +162,17 @@ Strict, non-overlapping regional allocations can preserve a global cap if accoun
 
 ## Reliability & Failure Modes
 
-![Failure response distinguishes policy outage, quota dependency failure, and expired grants](assets/failure-flow.svg)
-
-[Open the scalable failure-flow diagram](assets/failure-flow.svg)
-
-| Failure / endpoint | Chosen behavior | Protection / limit |
-|---|---|---|
-| Control plane unavailable for ten minutes | Continue last-known-good cached policy | Track version/age, alert, and define maximum staleness for high-risk rules; leases still expire independently. |
-| Redis slow or unavailable | Short timeouts; continue valid local allocations; apply fallback when necessary | Prevent replenishment from stalling request handling. |
-| Balance inquiry | Fail open for limiter uncertainty; use local fallback state | Tolerate temporary approximation; downstream safety controls still apply. |
-| Payment initiation | Fail closed, or a small bounded local emergency quota if designed | Mature preference is bounded availability; never unlimited traffic on Redis loss. |
-| Login / OTP | Fail closed when trustworthy enforcement is unavailable | Restrictive fallback needs an explicit safe design; prevent brute-force and OTP abuse. |
-| Redis state lost | Balance can use local state with limited over-admission | OTP must not reset to zero and issue a fresh quota; use trustworthy recent state, restrictive fallback, or fail closed. |
-| Gateway crash / network partition | Expire ownership and recover conservatively | Prevent stale spending and unsafe reclaim of possibly consumed tokens. |
-| Bad global policy, such as OTP = 0/min | Validate, approve, canary, monitor, and roll back | Versioned last-known-good configuration and audit trail constrain blast radius. |
-| Synchronized retries | Retry-After plus client jitter and progressive backoff | Identical retry delays reproduce the spike. |
+| Failure / endpoint | Containment and recovery |
+|---|---|
+| Control plane unavailable for ten minutes | Continue last-known-good cached policy<br>**Protection:** Track version/age, alert, and define maximum staleness for high-risk rules. Leases still expire independently. |
+| Redis slow or unavailable | Use short timeouts, continue valid local allocations, and apply endpoint fallback when necessary<br>**Protection:** Replenishment must not stall request handling. |
+| Balance inquiry | Fail open for limiter uncertainty; use local fallback state<br>**Protection:** Tolerate temporary approximation while retaining downstream safety controls. |
+| Payment initiation | Fail closed, or use a small bounded local emergency quota if explicitly designed<br>**Protection:** Never admit unlimited payment traffic because Redis is unavailable. |
+| Login / OTP | Fail closed when trustworthy enforcement is unavailable<br>**Protection:** Restrictive fallback must preserve brute-force and OTP-abuse controls. |
+| Redis state lost | Balance can use local state with limited over-admission<br>**Protection:** OTP must not reset to zero and issue a fresh quota; use trustworthy recent state, restrictive fallback, or fail closed. |
+| Gateway crash / network partition | Expire ownership and recover conservatively<br>**Protection:** Prevent stale spending and unsafe reclaim of possibly consumed tokens. |
+| Bad global policy, such as OTP = 0/min | Validate, approve, canary, monitor and roll back<br>**Protection:** Versioned last-known-good configuration and an audit trail constrain blast radius. |
+| Synchronized retries | Return Retry-After and require client jitter plus progressive backoff<br>**Protection:** Identical retry delays reproduce the spike. |
 
 Known quota exhaustion and inability to establish safe enforcement are different conditions. The drill chose 429 for exhaustion; dependency-failure response codes and retry contracts remain implementation decisions.
 
@@ -173,11 +197,11 @@ Agree SLI/SLO definitions, alert thresholds, and rollback triggers before launch
 
 ## Constraint Mutations
 
-| Changed constraint | Accepted response | Incomplete proposal / correction |
-|---|---|---|
-| Redis rises from 1 ms to 25 ms p95; gateway must stay below 5 ms p95 | Local request decisions, chunked asynchronous replenishment, early low-water trigger, bounded timeout/fallback | Redis rebalancing may relieve a shard but does not remove synchronous dependency latency. Waiting until zero is too late. |
-| Tenant A legitimately produces 60% of 100,000 RPS | Reserve up to 60,000 RPS for A, protect the remainder for others, enforce tenant ceiling, and govern optional overflow | Simply allocating more tokens can still starve other tenants. |
-| A has 60,000 RPS entitlement; payment service supports only 40,000 total | Downstream safety ceiling wins; add concurrency limits, load shedding, and backpressure | Contractual quota is not a promise to admit unsafe work. Capacity and entitlement must be reconciled operationally. |
+| Changed constraint | Response and correction |
+|---|---|
+| Redis rises from 1 ms to 25 ms p95; gateway must stay below 5 ms p95 | Make request decisions locally; replenish chunks asynchronously at a low-water mark; bound timeout and fallback<br>**Correction:** Redis rebalancing may relieve a shard but does not remove synchronous dependency latency. Waiting until zero is too late. |
+| Tenant A legitimately produces 60% of 100,000 RPS | Reserve up to 60,000 RPS for A, protect capacity for others, enforce a tenant ceiling, and govern optional overflow<br>**Correction:** Simply allocating more tokens can still starve other tenants. |
+| Tenant A has 60,000 RPS entitlement; the payment service supports only 40,000 total | The downstream safety ceiling wins; add concurrency limits, load shedding and backpressure<br>**Correction:** Contractual quota is not a promise to admit unsafe work. Capacity and entitlement must be reconciled operationally. |
 
 The priority is **downstream safety ceiling → tenant quota → individual-user quota**: admission must satisfy applicable constraints. Reserved quota provides isolation only within provisioned safe capacity.
 
@@ -207,27 +231,13 @@ For a proposed **20,000 → 500 RPS** cut, validate contracted entitlement, hist
 
 Organize by cross-team outcomes rather than naming teams alone.
 
-| Workstream | Owners / participants | Deliverable |
-|---|---|---|
-| Enforcement & Gateway Integration | Gateway + Security + service teams | Subjects, algorithms, endpoint fallback, 429 behavior, and service protection. |
-| Distributed Quota & Platform Reliability | Redis/Platform + Gateway + SRE | Atomic counters/reservations, leases, local grants, shared burst, hot-key mitigation, regional strategy and failover. |
-| Policy, Rollout & Observability | Control-plane + Security + SRE | Policy management/versioning, auditing, dashboards, alerts, canary, rollback, and customer-impact monitoring. |
-
-**Minimum production-readiness gates:**
-
-| Gate | Required evidence |
+| Outcome-based workstream | Evidence and accountable function |
 |---|---|
-| Dev / unit testing | Limiter logic, token arithmetic, TTL, atomic operations, and endpoint fail-open/fail-closed paths. |
-| E2E integration | Gateway, Redis, control plane, service dependencies, 429 handling, and policy propagation. |
-| Performance / resilience | Concurrent and peak traffic, bursts, hot keys, Redis latency/failure, partitions, state loss, and regional degradation. |
-| Implementation checklist | Configuration, ownership, runbooks, feature flags, policy versions, and executable rollback steps. |
-| InfoSec review | Abuse scenarios, login/OTP protection, tenant isolation, and audit controls. |
-| Mandatory operational readiness | Support model, incident procedures, alert thresholds, dashboards, and capacity assumptions. |
-| SRE / observability handover | SLIs/SLOs, 429s, Redis latency, quota exhaustion, hot keys, stale policy, and lease failures. |
-| Final Go / No-Go | Evidence-based decision, named accountable owners, accepted customer impact, and rollback readiness. |
-| Controlled rollout | **Shadow mode → canary → partial traffic → full enforcement**, with impact checks and rollback at each step. |
+| Enforcement & Gateway Integration | Subjects, algorithms, endpoint fallback, 429 behavior and service protection<br>**Accountable function:** Gateway with Security and service teams. |
+| Distributed Quota & Platform Reliability | Atomic reservations, leases, local grants, shared burst, hot-key mitigation, regional strategy and failover<br>**Accountable function:** Redis/Platform with Gateway and SRE. |
+| Policy, Rollout & Observability | Policy management/versioning, audit, dashboards, alerts, canary, rollback and customer-impact monitoring<br>**Accountable function:** Control-plane with Security and SRE. |
 
-These are release requirements, not completed implementation tests. Dates, staffing, named individuals, numerical acceptance thresholds, and exact rollout percentages were not assigned in the drill.
+Workstreams describe outcomes rather than team names. Dates, staffing, named individuals and numerical acceptance thresholds were not assigned in the drill.
 
 ## Program Risks
 
@@ -245,6 +255,37 @@ This consolidates architectural risks into delivery responsibilities; it is not 
 ## TPM Constraint Mutations
 
 No separate schedule-slip, staffing, or deadline mutation was completed for Topic 3. The completed delivery exercise defined workstreams and readiness gates; the Redis latency, tenant isolation, and downstream capacity mutations above supply the resilience and capacity evidence those workstreams must produce.
+
+## Production Readiness
+
+These are **release requirements, not completed implementation tests or signoffs**. Evidence and accountable owners must be assigned before Go/No-Go.
+
+| Gate | Evidence required before Go |
+|---|---|
+| Development / unit validation | Limiter logic, token arithmetic, TTL behavior, atomic operations and endpoint fail-open/fail-closed paths. |
+| E2E integration | Gateway, Redis, control plane and service dependencies work together; 429 behavior and policy propagation are verified. |
+| Performance / resilience | Representative peak and concurrent traffic, bursts, hot keys, Redis latency/failure, partitions, state loss and regional degradation. |
+| Implementation readiness | Configuration, ownership, runbooks, feature flags, policy versions and executable rollback steps. |
+| Security / InfoSec | Abuse scenarios, login/OTP protection, tenant isolation, audit controls and explicit approval. |
+| Operational readiness | Support model, incident procedures, alert thresholds, dashboards and capacity assumptions. |
+| SRE / observability handover | SLIs/SLOs, 429s, Redis latency, quota exhaustion, hot keys, stale policy and lease failures. |
+| Final Go / No-Go | Gate evidence, accepted residual risk, named decision owner, customer-impact criteria and rollback readiness. |
+
+Exact thresholds for latency, errors, over-admission, policy staleness, shared-pool depletion and rollback timing remain to be defined. The exercise values are scenarios, not production acceptance criteria.
+
+## Rollout & Rollback
+
+Use **observe/shadow → small canary → partial traffic or selected tenants → progressive expansion → full enforcement**. Shadow mode records decisions without blocking customers; it must not duplicate downstream operations. Compare observed would-block traffic against expected customer behavior before enforcement begins.
+
+| Trigger | Action and recovery check |
+|---|---|
+| Invalid policy or failed validation | Block deployment<br>**Recovery check:** Correct and validate a new version before retrying. |
+| Canary 429s or customer failures rise unexpectedly | Freeze expansion and compare baseline with canary<br>**Recovery check:** Resume only after policy, identity dimensions and capacity assumptions are verified. |
+| Gateway latency, Redis refill failures or pool depletion breach agreed limits | Reduce exposure or restore last-known-good policy/grants<br>**Recovery check:** Confirm local decision latency and safe allocator capacity before expanding again. |
+| Login, OTP or payment abuse controls weaken | Stop affected exposure and invoke security incident controls<br>**Recovery check:** Restore trustworthy state and conservative enforcement before resuming. |
+| Rollout is healthy | Increase exposure gradually while monitoring customer and downstream outcomes<br>**Recovery check:** Preserve a usable last-known-good version throughout expansion. |
+
+**Production clarification.** Rolling back policy does not reconstruct lost quota history or make an expired grant valid. State recovery, policy rollback and traffic exposure are separate operations with separate safety checks.
 
 ## Concepts Learned
 

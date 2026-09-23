@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="770" viewBox="0 0 440 770" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Rate limiter request path</title>
+<desc id="desc">Client traffic reaches edge routing, the gateway identifies the subject and checks cached policy plus valid local quota, then allows the request to protected banking services or returns HTTP 429.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">Rate limiter request path</text>
+<rect x="20" y="64" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="92" font-size="20" font-weight="700">Client → edge / load balancer</text>
+<text x="34" y="120" font-size="19">Coarse abuse controls</text>
+<text x="34" y="148" font-size="19">Route to a healthy gateway</text>
+<path d="M220 168 V194" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="204" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="232" font-size="20" font-weight="700">Identify the rate-limit subject</text>
+<text x="34" y="260" font-size="19">User · tenant · account · endpoint</text>
+<text x="34" y="288" font-size="19">IP remains a coarse abuse signal</text>
+<path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="372" font-size="20" font-weight="700">Local gateway decision</text>
+<text x="34" y="400" font-size="19">Cached policy + valid local grant</text>
+<text x="34" y="428" font-size="19">Consume atomically without Redis wait</text>
+<path d="M220 448 V474" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
+<text x="34" y="512" font-size="20" font-weight="700">Capacity available → ALLOW</text>
+<text x="34" y="540" font-size="19">Forward to the banking service</text>
+<text x="34" y="568" font-size="19">Apply downstream safety limits</text>
+<path d="M220 588 V614" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#fdeeee" stroke="#c78585"/>
+<text x="34" y="652" font-size="20" font-weight="700">Quota exhausted → HTTP 429</text>
+<text x="34" y="680" font-size="19">Retry-After where meaningful</text>
+<text x="34" y="708" font-size="19">Client jitter + progressive backoff</text>
+</g></svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="770" viewBox="0 0 440 770" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Quota allocation and policy distribution</title>
+<desc id="desc">The control plane validates and distributes versioned policy while gateways asynchronously replenish local quota through an atomic regional allocator and install time-bounded grants.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">Quota and policy flow</text>
+<rect x="20" y="64" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="92" font-size="20" font-weight="700">Control plane</text>
+<text x="34" y="120" font-size="19">Validate and version policies</text>
+<text x="34" y="148" font-size="19">Allocate regional quota budgets</text>
+<path d="M220 168 V194" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="204" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="232" font-size="20" font-weight="700">Policy distribution</text>
+<text x="34" y="260" font-size="19">Publish approved version to gateways</text>
+<text x="34" y="288" font-size="19">Retain last-known-good configuration</text>
+<path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#fff6df" stroke="#c79d42"/>
+<text x="34" y="372" font-size="20" font-weight="700">Gateway low-water mark</text>
+<text x="34" y="400" font-size="19">Request a quota chunk early</text>
+<text x="34" y="428" font-size="19">Replenishment stays asynchronous</text>
+<path d="M220 448 V474" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#fff6df" stroke="#c79d42"/>
+<text x="34" y="512" font-size="20" font-weight="700">Regional allocator / Redis</text>
+<text x="34" y="540" font-size="19">Reserve shared capacity atomically</text>
+<text x="34" y="568" font-size="19">Return a time-bounded grant</text>
+<path d="M220 588 V614" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
+<text x="34" y="652" font-size="20" font-weight="700">Gateway installs valid grant</text>
+<text x="34" y="680" font-size="19">Continue local consumption</text>
+<text x="34" y="708" font-size="19">Failure → endpoint fallback policy</text>
+</g></svg>

@@ -15,17 +15,17 @@
 <text x="34" y="260" font-size="19" font-weight="400">Bots, IP rotation, tenant anomalies</text>
 <text x="34" y="288" font-size="19" font-weight="400">No direct production quota changes</text>
 <path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="20" y="344" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#fff6df" stroke="#c79d42"/>
 <text x="34" y="372" font-size="20" font-weight="700">Deterministic validation</text>
 <text x="34" y="400" font-size="19" font-weight="400">Contract, history, seasonality</text>
 <text x="34" y="428" font-size="19" font-weight="400">Quota floors + bounded changes</text>
 <path d="M220 448 V474" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="20" y="484" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#fff6df" stroke="#c79d42"/>
 <text x="34" y="512" font-size="20" font-weight="700">Approval and staged rollout</text>
 <text x="34" y="540" font-size="19" font-weight="400">Human / policy-engine approval</text>
 <text x="34" y="568" font-size="19" font-weight="400">Canary → partial → full rollout</text>
 <path d="M220 588 V614" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="20" y="624" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
 <text x="34" y="652" font-size="20" font-weight="700">Versioned gateway policy</text>
 <text x="34" y="680" font-size="19" font-weight="400">Monitor 429s and customer impact</text>
 <text x="34" y="708" font-size="19" font-weight="400">Rollback to last-known-good policy</text>
