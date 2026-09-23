@@ -265,14 +265,14 @@ Metrics show something is wrong; logs describe events; traces locate behavior ac
 
 | Challenge | Outcome retained |
 |---|---|
-| “Regional LB plus internal balancing is double balancing.” | They choose from different pools: gateway instances versus service instances. Simplify implementation where possible, preserving both functions. |
-| “US can authenticate synchronously through Canada.” | Rejected: Canada's outage would disable US, and every request adds cross-region latency. |
-| “Each layer retries three times.” | Rejected: multiplicative load amplification. Use one controlled retry layer, total deadlines, budgets, jitter and idempotency. |
-| “Three failed checks mean move everything immediately.” | Rejected: transient failures, false positives and target overload can create a second outage. Use corroborated readiness and bounded shifts. |
-| “Sticky sessions make the next request easier.” | Corrected: ordinary APIs should work on any healthy gateway; session locality harms balancing and failover. |
-| “Put business rules in the gateway to save a hop.” | Rejected: banking correctness belongs in domain/application services. |
-| “A healthy region is failover-ready.” | Incomplete: capacity, IAM, certificates, replication/write authority and downstreams must also be ready. |
-| “Last-known-good solves bad global config.” | Incomplete: prevention requires validation and staged rollout, not only rollback after widespread impact. |
+| Regional LB plus internal balancing is double balancing. | They choose from different pools: gateway instances versus service instances. Simplify implementation where possible, preserving both functions. |
+| US can authenticate synchronously through Canada. | Rejected: Canada's outage would disable US, and every request adds cross-region latency. |
+| Each layer retries three times. | Rejected: multiplicative load amplification. Use one controlled retry layer, total deadlines, budgets, jitter and idempotency. |
+| Three failed checks mean move everything immediately. | Rejected: transient failures, false positives and target overload can create a second outage. Use corroborated readiness and bounded shifts. |
+| Sticky sessions make the next request easier. | Corrected: ordinary APIs should work on any healthy gateway; session locality harms balancing and failover. |
+| Put business rules in the gateway to save a hop. | Rejected: banking correctness belongs in domain/application services. |
+| A healthy region is failover-ready. | Incomplete: capacity, IAM, certificates, replication/write authority and downstreams must also be ready. |
+| Last-known-good solves bad global config. | Incomplete: prevention requires validation and staged rollout, not only rollback after widespread impact. |
 
 The explicitly completed adversarial sequence covered double balancing, cross-region auth, retry amplification and aggressive failover. Earlier design challenges supply the additional findings above.
 
