@@ -1,6 +1,6 @@
 # Topic 4 — API Gateway + Global Load Balancing
 
-[Back to Arch Drills](../README.md)
+[Back to Architecture Drills](../Main%20Readme/README.md)
 
 **Status:** Complete
 

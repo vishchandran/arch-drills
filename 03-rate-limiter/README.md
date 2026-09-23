@@ -1,6 +1,6 @@
 # Topic 3 — Rate Limiter
 
-[Back to Arch Drills](../README.md)
+[Back to Architecture Drills](../Main%20Readme/README.md)
 
 **Status:** Complete
 

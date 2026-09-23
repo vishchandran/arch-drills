@@ -1,4 +1,4 @@
-# Main README — Arch Drills
+# Architecture Drills
 
 A code-free System Architecture drill book covering architecture reasoning, distributed systems, trade-offs, reliability, security, and delivery.
 
@@ -16,12 +16,12 @@ Follow the numbered folders in curriculum order. A topic is added here after its
 
 | Topic | Status |
 |---|---|
-| [1. Architecture Foundations](01-architecture-foundations/README.md) | Complete |
-| [2. URL Shortener](02-url-shortener/README.md) | Complete |
-| [3. Rate Limiter](03-rate-limiter/README.md) | Complete |
-| [4. API Gateway + Global Load Balancing](04-api-gateway-global-load-balancing/README.md) | Complete |
-| [5. Service Mesh + Service Discovery](05-service-mesh-service-discovery/README.md) | Complete |
-| [6. Distributed Cache](06-distributed-cache/README.md) | Complete |
+| [1. Architecture Foundations](../01-architecture-foundations/README.md) | Complete |
+| [2. URL Shortener](../02-url-shortener/README.md) | Complete |
+| [3. Rate Limiter](../03-rate-limiter/README.md) | Complete |
+| [4. API Gateway + Global Load Balancing](../04-api-gateway-global-load-balancing/README.md) | Complete |
+| [5. Service Mesh + Service Discovery](../05-service-mesh-service-discovery/README.md) | Complete |
+| [6. Distributed Cache](../06-distributed-cache/README.md) | Complete |
 
 ## Chapter structure
 
