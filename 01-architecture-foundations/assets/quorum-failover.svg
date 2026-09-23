@@ -3,15 +3,15 @@
 <desc id="desc">Teaching example • three voting database nodes. 1  Network partition A is the old leader and becomes isolated B and C can still communicate 2  Majority side: B + C Two of three votes establish a majority Elect an eligible, sufficiently current leader 3  Preserve committed history Voting, term and log rules enforce authority Resume under valid commit and read rules 4  Minority side: A alone One of three votes cannot establish authority No authoritative commits or unsafe reads. Cards 2–3 describe the majority; card 4 the minority.
 A partition is not necessarily a crashed server.</desc>
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10" fill="#42647b"/></marker></defs>
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="white"/>
 <g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
 <text x="28" y="40" font-size="25" font-weight="700">Quorum and safe failover</text>
-<text x="28" y="74" font-size="18" fill="#465d6d">Teaching example • three voting database nodes</text>
+<text x="28" y="74" font-size="18" fill="#162b3b">Teaching example • three voting database nodes</text>
 <rect x="28" y="124" width="504" height="120" rx="12" fill="#eff6fb" stroke="#6b97b3" stroke-width="1.5"/>
 <text x="48" y="156" font-size="22" font-weight="700">1  Network partition</text>
 <text x="48" y="189" font-size="20" font-weight="400">A is the old leader and becomes isolated</text>
 <text x="48" y="218" font-size="20" font-weight="400">B and C can still communicate</text>
-<path d="M28 184 H12 V664 H25" fill="none" stroke="#b88731" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M28 184 H12 V664 H25" fill="none" stroke="#c79d42" stroke-width="2" marker-end="url(#arrow)"/>
 <path d="M280 248 V276" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
 <rect x="28" y="284" width="504" height="120" rx="12" fill="#eff6fb" stroke="#6b97b3" stroke-width="1.5"/>
 <text x="48" y="316" font-size="22" font-weight="700">2  Majority side: B + C</text>
@@ -22,10 +22,10 @@ A partition is not necessarily a crashed server.</desc>
 <text x="48" y="476" font-size="22" font-weight="700">3  Preserve committed history</text>
 <text x="48" y="509" font-size="20" font-weight="400">Voting, term and log rules enforce authority</text>
 <text x="48" y="538" font-size="20" font-weight="400">Resume under valid commit and read rules</text>
-<rect x="28" y="604" width="504" height="120" rx="12" fill="#fff6e7" stroke="#b88731" stroke-width="1.5"/>
+<rect x="28" y="604" width="504" height="120" rx="12" fill="#fff6df" stroke="#c79d42" stroke-width="1.5"/>
 <text x="48" y="636" font-size="22" font-weight="700">4  Minority side: A alone</text>
 <text x="48" y="669" font-size="20" font-weight="400">One of three votes cannot establish authority</text>
 <text x="48" y="698" font-size="20" font-weight="400">No authoritative commits or unsafe reads</text>
-<text x="28" y="775" font-size="17" fill="#465d6d">Cards 2–3 describe the majority; card 4 the minority.</text>
-<text x="28" y="800" font-size="17" fill="#465d6d">A partition is not necessarily a crashed server.</text>
+<text x="28" y="775" font-size="17" fill="#162b3b">Cards 2–3 describe the majority; card 4 the minority.</text>
+<text x="28" y="800" font-size="17" fill="#162b3b">A partition is not necessarily a crashed server.</text>
 </g></svg>

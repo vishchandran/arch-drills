@@ -3,10 +3,10 @@
 <desc id="desc">Bound work • fail clearly • recover gradually. 1  Admit safe demand Throttle incoming traffic when required Gateway capacity is finite too 2  Bound concurrent DB work Cap connections and use a small wait queue Do not turn saturation into unlimited waiting 3  Capacity exhausted / DB unhealthy Timeout and fail fast on the affected path Return 503; Retry-After when appropriate 4  Retry within limits Bound attempts; use backoff and jitter Avoid synchronized recovery traffic 5  Recover under control An open breaker uses limited half-open probes Observe latency, errors, pools and queues. 429 = caller rate limit; 503 = cannot safely serve now.
 A breaker protects a dependency path, not all work.</desc>
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10" fill="#42647b"/></marker></defs>
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="white"/>
 <g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
 <text x="28" y="40" font-size="25" font-weight="700">Protect the dependency</text>
-<text x="28" y="74" font-size="18" fill="#465d6d">Bound work • fail clearly • recover gradually</text>
+<text x="28" y="74" font-size="18" fill="#162b3b">Bound work • fail clearly • recover gradually</text>
 <rect x="28" y="124" width="504" height="120" rx="12" fill="#eff6fb" stroke="#6b97b3" stroke-width="1.5"/>
 <text x="48" y="156" font-size="22" font-weight="700">1  Admit safe demand</text>
 <text x="48" y="189" font-size="20" font-weight="400">Throttle incoming traffic when required</text>
@@ -17,7 +17,7 @@ A breaker protects a dependency path, not all work.</desc>
 <text x="48" y="349" font-size="20" font-weight="400">Cap connections and use a small wait queue</text>
 <text x="48" y="378" font-size="20" font-weight="400">Do not turn saturation into unlimited waiting</text>
 <path d="M280 408 V436" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="28" y="444" width="504" height="120" rx="12" fill="#fff6e7" stroke="#b88731" stroke-width="1.5"/>
+<rect x="28" y="444" width="504" height="120" rx="12" fill="#fff6df" stroke="#c79d42" stroke-width="1.5"/>
 <text x="48" y="476" font-size="22" font-weight="700">3  Capacity exhausted / DB unhealthy</text>
 <text x="48" y="509" font-size="20" font-weight="400">Timeout and fail fast on the affected path</text>
 <text x="48" y="538" font-size="20" font-weight="400">Return 503; Retry-After when appropriate</text>
@@ -31,6 +31,6 @@ A breaker protects a dependency path, not all work.</desc>
 <text x="48" y="796" font-size="22" font-weight="700">5  Recover under control</text>
 <text x="48" y="829" font-size="20" font-weight="400">An open breaker uses limited half-open probes</text>
 <text x="48" y="858" font-size="20" font-weight="400">Observe latency, errors, pools and queues</text>
-<text x="28" y="935" font-size="17" fill="#465d6d">429 = caller rate limit; 503 = cannot safely serve now.</text>
-<text x="28" y="960" font-size="17" fill="#465d6d">A breaker protects a dependency path, not all work.</text>
+<text x="28" y="935" font-size="17" fill="#162b3b">429 = caller rate limit; 503 = cannot safely serve now.</text>
+<text x="28" y="960" font-size="17" fill="#162b3b">A breaker protects a dependency path, not all work.</text>
 </g></svg>

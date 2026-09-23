@@ -8,10 +8,13 @@ A bank's available-balance service is the vehicle for learning how correctness, 
 
 The design deliberately removes Redis from the critical balance-read path and postpones sharding until measurement justifies it. The harder topologies below record the drill's constraint mutations; they are not all mandatory components of the original 20,000 RPS design.
 
+The chapter is organized by responsibility and failure boundary: the request path returns an authoritative balance, the database tier owns truth and leadership, overload controls protect the shared dependency, and operational work proves that failover is both safe and adequately provisioned. Exact database technology, node count, commit policy, recovery objectives, and measured production capacity remain implementation decisions.
+
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
 - [Final Architecture](#final-architecture)
+- [End-to-End Flow](#end-to-end-flow)
 - [Component Responsibilities](#component-responsibilities)
 - [Key Architecture Decisions](#key-architecture-decisions)
 - [Data & Consistency](#data--consistency)
@@ -25,6 +28,8 @@ The design deliberately removes Redis from the critical balance-read path and po
 - [TPM Delivery](#tpm-delivery)
 - [Program Risks](#program-risks)
 - [TPM Constraint Mutations](#tpm-constraint-mutations)
+- [Production Readiness](#production-readiness)
+- [Rollout & Rollback](#rollout--rollback)
 - [Concepts Learned](#concepts-learned)
 - [Mental Models](#mental-models)
 
@@ -34,16 +39,16 @@ Return the customer's **current available balance** through mobile banking, web 
 
 The defining example is a customer with $2,000 who spends $500 and immediately checks their balance. Once the debit succeeds, the next read must reflect the committed change: $1,500, assuming no further updates. A stale $2,000 can influence another spending decision. This is why consistency is a business requirement before it is a database setting.
 
-| Requirement | Established in the drill | Architectural consequence |
-|---|---|---|
-| Customer population | 10 million customers; 500,000 daily active users | Customer count alone does not determine request load. |
-| Peak throughput | 20,000 balance requests per second (RPS) | Size and test the entire request path, including connections and the database. |
-| Latency | Under 200 ms; refined to 99% of balance requests under 200 ms | Monitor the successful request fraction under the threshold and p99 latency. |
-| Availability | 99.99% | Multiple healthy service instances, separate failure domains, safe DB failover, and spare capacity. |
-| Freshness | Strongly consistent available balance | Read through the authoritative path; no silently stale cache or ordinary asynchronous replica fallback. |
-| Security | Caller identity plus account-level authorization | Authenticate at the edge and enforce permissions again at the balance service. |
-| Financial correctness | No duplicate effects; preserve committed state and accounting rules | Transactional enforcement, durable operation records, and idempotency for balance-changing operations. |
-| Failure response | Controlled temporary unavailability when correctness cannot be assured | Bound waiting and protect dependencies instead of returning a plausible but unsafe value. |
+| Requirement | Decision and consequence |
+|---|---|
+| Customer population | 10 million customers; 500,000 daily active users<br>**Consequence:** Customer count alone does not determine request load. |
+| Peak throughput | 20,000 balance requests per second (RPS)<br>**Consequence:** Size and test the entire request path, including connections and the database. |
+| Latency | Under 200 ms; refined to 99% of balance requests under 200 ms<br>**Consequence:** Monitor the successful request fraction under the threshold and p99 latency. |
+| Availability | 99.99%<br>**Consequence:** Multiple healthy service instances, separate failure domains, safe DB failover, and spare capacity. |
+| Freshness | Strongly consistent available balance<br>**Consequence:** Read through the authoritative path; no silently stale cache or ordinary asynchronous replica fallback. |
+| Security | Caller identity plus account-level authorization<br>**Consequence:** Authenticate at the edge and enforce permissions again at the balance service. |
+| Financial correctness | No duplicate effects; preserve committed state and accounting rules<br>**Consequence:** Transactional enforcement, durable operation records, and idempotency for balance-changing operations. |
+| Failure response | Controlled temporary unavailability when correctness cannot be assured<br>**Consequence:** Bound waiting and protect dependencies instead of returning a plausible but unsafe value. |
 
 **Scope boundary.** The core capability is balance inquiry. Updates and transfers were introduced to test consistency, atomicity, retries, and sharding. The drill did not specify a full ledger schema, balance-calculation formula, payment-processing platform, or distributed-transaction implementation.
 
@@ -51,11 +56,37 @@ The defining example is a customer with $2,000 who spends $500 and immediately c
 
 ## Final Architecture
 
+The diagrams separate the baseline topology, database authority, and overload behavior so each view remains readable on GitHub web and mobile.
+
+### Baseline topology
+
 ![Available-balance request path from channels through the gateway and stateless service to the authoritative database, with replication and safe failover](assets/balance-architecture.svg)
 
 [Open the scalable architecture diagram](assets/balance-architecture.svg)
 
-**End-to-end read flow**
+The baseline is a stateless service fleet across failure zones with a bounded path to one strongly consistent authoritative database system. Replicas support safe failover; backups support recovery. Redis, database sharding, and AI are not required to answer the baseline balance request.
+
+### Quorum and failover
+
+![Quorum example showing B and C holding two of three votes while isolated old leader A cannot commit authoritative writes](assets/quorum-failover.svg)
+
+[Open the scalable quorum diagram](assets/quorum-failover.svg)
+
+The majority may establish a valid leader only under the database system's election, term, log, and fencing rules. The isolated minority must not continue as a competing authority. Three nodes are a teaching example, not a prescribed production node count.
+
+### Overload protection
+
+![Bounded overload response: admission controls, capped concurrency and queueing, fast failure, then bounded backoff and jitter](assets/overload-protection.svg)
+
+[Open the scalable overload-protection diagram](assets/overload-protection.svg)
+
+Admission control, bounded concurrency, small queues, timeouts, and circuit breakers protect the authoritative store. When safe capacity is exhausted, a controlled failure is preferable to unlimited waiting, retry amplification, or a stale balance.
+
+### Baseline and extensions
+
+The baseline is gateway/load balancing, multiple stateless balance-service instances, one logical authoritative database with high-availability replicas, and observability/security controls. Sharding, cache, regional placement changes, and cross-shard transfer recovery are extensions introduced only when a requirement or measurement justifies them.
+
+## End-to-End Flow
 
 1. A channel requests the balance for an account with a verifiable customer/security context.
 2. The gateway authenticates and applies admission controls; the load balancer distributes admitted work across healthy instances.
@@ -64,38 +95,38 @@ The defining example is a customer with $2,000 who spends $500 and immediately c
 5. The service returns the committed balance. If the authoritative path is unavailable or correctness is uncertain, it returns a controlled temporary-unavailable response.
 6. Logs, traces, latency/error metrics, and dependency signals make both success and failure diagnosable.
 
-**Supporting capabilities.** Identity, certificates, secrets, observability, and deployment controls support the request path. A connection proxy/pooler is an option when useful, not a mandatory extra hop. Redis is optional for suitable non-critical metadata. AI analysis runs separately and asynchronously. Shards appear only in the scale extension, with one authoritative owner per shard.
+**Supporting capabilities.** Identity, certificates, secrets, observability, and deployment controls support the request path. A connection proxy/pooler is an option when useful, not a mandatory extra hop. Redis is optional for suitable non-critical metadata. Any AI analysis runs separately and asynchronously. Shards appear only in the scale extension, with one authoritative owner per shard.
 
 ## Component Responsibilities
 
-| Component | Responsibility | Why It Exists | Failure Impact |
-|---|---|---|---|
-| Channels | Present balance and controlled failure to the customer; carry trusted identity context | Multiple banking experiences share one capability | One channel can fail independently; channel checks alone cannot secure all callers. |
-| Gateway / load balancer | Authentication integration, throttling, routing, health-based distribution | Protect and distribute entry traffic | A shared bottleneck or failed routing tier can affect the whole service. |
-| Stateless balance service | Account authorization, authoritative reads, bounded dependency calls, operation semantics | Keeps customer access rules and behavior consistent across callers | Instances are replaceable; shared downstream failure still affects the fleet. |
-| DB connection pools / optional proxy | Reuse connections within a shared connection budget | Prevent per-instance pools from multiplying beyond DB capacity | Pool exhaustion creates waiting even with healthy DB CPU. |
-| Authoritative DB | Own balance state and enforce transactional constraints | Correctness must survive application races, retries, and restarts | Loss of authority means no safe balance response. |
-| Replicas / failover mechanism | Replicate state and safely establish a replacement leader | Survive instance and permitted failure-domain loss | Lag, unsafe promotion, or lost quorum can block recovery or threaten committed history. |
-| Backups | Recover stored state after broader loss | Replication and recovery solve different problems | Without tested recovery, a disaster may leave no dependable restoration path. |
-| Identity / secrets / certificate management | Issue, validate, rotate and revoke identities and credentials | Enforce service identity and least privilege | Shared or unavailable security dependencies can have broad blast radius. |
-| Observability / SRE | Detect customer impact, saturation, security events, and degraded redundancy | Production readiness requires evidence and response | Hidden degradation becomes a late customer-facing incident. |
-| Optional Redis / async AI | Cache eligible metadata; analyze operational patterns | Introduce only with a demonstrated benefit | Neither may become necessary to answer an authoritative balance read. |
+| Component | Responsibility / boundary |
+|---|---|
+| Channels | Present balance and controlled failure to the customer; carry trusted identity context<br>**Why:** Multiple banking experiences share one capability<br>**Boundary:** One channel can fail independently; channel checks alone cannot secure all callers. |
+| Gateway / load balancer | Authentication integration, throttling, routing, health-based distribution<br>**Why:** Protect and distribute entry traffic<br>**Boundary:** A shared bottleneck or failed routing tier can affect the whole service. |
+| Stateless balance service | Account authorization, authoritative reads, bounded dependency calls, operation semantics<br>**Why:** Keeps customer access rules and behavior consistent across callers<br>**Boundary:** Instances are replaceable; shared downstream failure still affects the fleet. |
+| DB connection pools / optional proxy | Reuse connections within a shared connection budget<br>**Why:** Prevent per-instance pools from multiplying beyond DB capacity<br>**Boundary:** Pool exhaustion creates waiting even with healthy DB CPU. |
+| Authoritative DB | Own balance state and enforce transactional constraints<br>**Why:** Correctness must survive application races, retries, and restarts<br>**Boundary:** Loss of authority means no safe balance response. |
+| Replicas / failover mechanism | Replicate state and safely establish a replacement leader<br>**Why:** Survive instance and permitted failure-domain loss<br>**Boundary:** Lag, unsafe promotion, or lost quorum can block recovery or threaten committed history. |
+| Backups | Recover stored state after broader loss<br>**Why:** Replication and recovery solve different problems<br>**Boundary:** Without tested recovery, a disaster may leave no dependable restoration path. |
+| Identity / secrets / certificate management | Issue, validate, rotate and revoke identities and credentials<br>**Why:** Enforce service identity and least privilege<br>**Boundary:** Shared or unavailable security dependencies can have broad blast radius. |
+| Observability / SRE | Detect customer impact, saturation, security events, and degraded redundancy<br>**Why:** Production readiness requires evidence and response<br>**Boundary:** Hidden degradation becomes a late customer-facing incident. |
+| Optional Redis / async AI | Cache eligible metadata; analyze operational patterns<br>**Why:** Introduce only with a demonstrated benefit<br>**Boundary:** Neither may become necessary to answer an authoritative balance read. |
 
 ## Key Architecture Decisions
 
-| Decision | Why We Chose It | Alternative | Trade-off |
-|---|---|---|---|
-| Define consistency before sync/async mechanisms | First establish what the customer may observe after a debit | Start with a transport or replication pattern | Requirements constrain implementation rather than follow it. |
-| Keep services stateless | All instances use one authoritative data layer | Replicate local balances between app servers | Easier replacement and scaling; DB remains a shared dependency. |
-| Remove Redis from available-balance reads | Invalidation failure can silently expose old funds | Cache balance and validate versions | More authoritative read load, less distributed correctness complexity. |
-| Read through leader or supported strong-read policy | Ordinary asynchronous replicas may lag | Send all reads to read replicas | Lower read-scale freedom in return for the required visibility guarantee. |
-| Optimize a single logical primary with HA first | 20,000 RPS alone does not prove a need to shard | Heavily sharded topology upfront | Simpler operation until measured limits justify migration. |
-| Replicate across failure domains | A replica on the same failed zone is no rescue | More copies in one zone | Greater infrastructure cost and replication latency. |
-| Use safe election and eligible promotion | A healthy replica is not automatically authorized or sufficiently current | Let any reachable replica take over | Some unavailability is preferable to conflicting authorities. |
-| Bound work and fail fast | Slow dependencies otherwise retain threads, memory and connections | Unlimited queuing and aggressive retries | Some requests are rejected to prevent widespread collapse. |
-| Enforce authorization at the service | Channels and internal callers can be compromised or misconfigured | Channel-only checks to save service work | Efficient checks cost some processing but preserve the security boundary. |
-| Enforce idempotency at the transaction store | Concurrent service checks can both pass | Application-only check-then-insert | Requires durable records and transactional uniqueness. |
-| Keep AI outside synchronous balance flow | No model is needed to retrieve a committed number | Add an LLM between service and DB | Operational recommendations remain possible without model latency or nondeterminism in reads. |
+| Decision / disposition | Rationale and trade-off |
+|---|---|
+| Define consistency before sync/async mechanisms | First establish what the customer may observe after a debit<br>**Alternative:** Start with a transport or replication pattern<br>**Trade-off:** Requirements constrain implementation rather than follow it. |
+| Keep services stateless | All instances use one authoritative data layer<br>**Alternative:** Replicate local balances between app servers<br>**Trade-off:** Easier replacement and scaling; DB remains a shared dependency. |
+| Remove Redis from available-balance reads | Invalidation failure can silently expose old funds<br>**Alternative:** Cache balance and validate versions<br>**Trade-off:** More authoritative read load, less distributed correctness complexity. |
+| Read through leader or supported strong-read policy | Ordinary asynchronous replicas may lag<br>**Alternative:** Send all reads to read replicas<br>**Trade-off:** Lower read-scale freedom in return for the required visibility guarantee. |
+| Optimize a single logical primary with HA first | 20,000 RPS alone does not prove a need to shard<br>**Alternative:** Heavily sharded topology upfront<br>**Trade-off:** Simpler operation until measured limits justify migration. |
+| Replicate across failure domains | A replica on the same failed zone is no rescue<br>**Alternative:** More copies in one zone<br>**Trade-off:** Greater infrastructure cost and replication latency. |
+| Use safe election and eligible promotion | A healthy replica is not automatically authorized or sufficiently current<br>**Alternative:** Let any reachable replica take over<br>**Trade-off:** Some unavailability is preferable to conflicting authorities. |
+| Bound work and fail fast | Slow dependencies otherwise retain threads, memory and connections<br>**Alternative:** Unlimited queuing and aggressive retries<br>**Trade-off:** Some requests are rejected to prevent widespread collapse. |
+| Enforce authorization at the service | Channels and internal callers can be compromised or misconfigured<br>**Alternative:** Channel-only checks to save service work<br>**Trade-off:** Efficient checks cost some processing but preserve the security boundary. |
+| Enforce idempotency at the transaction store | Concurrent service checks can both pass<br>**Alternative:** Application-only check-then-insert<br>**Trade-off:** Requires durable records and transactional uniqueness. |
+| Keep AI outside synchronous balance flow | No model is needed to retrieve a committed number<br>**Alternative:** Add an LLM between service and DB<br>**Trade-off:** Operational recommendations remain possible without model latency or nondeterminism in reads. |
 
 ## Data & Consistency
 
@@ -122,13 +153,13 @@ Reintroduce a balance cache only after demonstrating both a real capacity/cost b
 
 **ACID** expands to Atomicity, Consistency, Isolation, and Durability.
 
-| Property | Question it answers | Drill example |
-|---|---|---|
-| Atomicity | Do all changes commit, or none? | Debit, credit and transaction record form one all-or-nothing transaction where a local boundary covers them. |
-| Consistency | Are defined rules and invariants preserved? | Valid account and accounting constraints remain valid after the transaction. |
-| Isolation | Can concurrent transactions interfere unsafely? | Two purchases must not both act on an incompatible view of the same funds. |
-| Durability | Does committed state survive failure? | An acknowledged transfer must not disappear after restart. |
-| Distributed strong consistency | What can a subsequent reader observe? | After the debit succeeds, a read must not return the older $2,000 copy. |
+| Property | Working meaning and example |
+|---|---|
+| Atomicity | Do all changes commit, or none?<br>**Example:** Debit, credit and transaction record form one all-or-nothing transaction where a local boundary covers them. |
+| Consistency | Are defined rules and invariants preserved?<br>**Example:** Valid account and accounting constraints remain valid after the transaction. |
+| Isolation | Can concurrent transactions interfere unsafely?<br>**Example:** Two purchases must not both act on an incompatible view of the same funds. |
+| Durability | Does committed state survive failure?<br>**Example:** An acknowledged transfer must not disappear after restart. |
+| Distributed strong consistency | What can a subsequent reader observe?<br>**Example:** After the debit succeeds, a read must not return the older $2,000 copy. |
 
 The useful mistake was assuming an ACID transaction prevented stale replica reads. It does not: the primary can commit correctly while an asynchronous replica remains behind. The transaction boundary and read-routing/replication policy must both satisfy the business guarantee. Isolation also needs an appropriate transaction design and level; the acronym alone is not proof that every race is prevented.
 
@@ -140,8 +171,6 @@ The useful mistake was assuming an ACID transaction prevented stale replica read
 - **Election and commit policy are different decisions:** that acknowledgement example is not a universal quorum recipe or a selected production configuration. Acknowledgement durability, replica apply state, read rules, and failover eligibility must work together; synchronous replication alone does not make every replica read current.
 
 **Quorum from the database upward.** One DB instance is one running database member with compute, memory, storage and connections. One leader plus two replicas is three instances. With three voting members a majority is two; with five it is three. These are teaching topologies, not a mandate to deploy five nodes.
-
-![Quorum example showing B and C holding two of three votes while isolated old leader A cannot commit authoritative writes](assets/quorum-failover.svg)
 
 Nodes exchange heartbeats. Loss of contact triggers suspicion and an election, not proof that the old leader is dead. Eligible candidates seek votes under the cluster's term/epoch and replicated-log rules. A majority establishes authority; stale authority must not continue committing conflicting writes. Clients then reach the valid leader. This logic belongs in the database/coordination system, commonly through consensus such as Raft, rather than custom balance-service voting.
 
@@ -169,50 +198,48 @@ Preserve durable transfer state: transfer ID, debit completion, credit pending, 
 
 ### Capacity exercises that changed the reasoning
 
-| Exercise | Result | What the number does and does not establish |
-|---|---|---|
-| 20,000 peak RPS ÷ 2,000 safe RPS per instance | 10 instances | Bare load minimum under the stated exercise assumption; no failure reserve. |
-| Lose one of those 10 instances | 18,000 RPS remains | Autoscaling cannot instantly close the 2,000 RPS gap. |
-| Survive two simultaneous instance failures at peak | At least 12 instances | Covers that specific failure assumption, not automatically an AZ loss, burst, or deployment overlap. |
-| New instance takes 90 seconds; weekday demand doubles at 9:00 | Pre-scale before 9:00 with startup/health-check buffer | Predictable demand should not wait for reactive detection. |
-| 20 instances × 50 DB connections | Up to 1,000 connections | Pools create downstream demand independently of request volume. |
-| 100 instances × the same 50 connections | Up to 5,000 connections | A 5× connection increase can happen even at unchanged customer RPS. |
-| DB budget 2,000 connections ÷ 100 instances | At most 20 per instance before reserve | Allocate less where admin, other services, failover and maintenance need capacity. |
+| Exercise | Result and implication |
+|---|---|
+| 20,000 peak RPS ÷ 2,000 safe RPS per instance | **Result:** 10 instances<br>Bare load minimum under the stated exercise assumption; no failure reserve. |
+| Lose one of those 10 instances | **Result:** 18,000 RPS remains<br>Autoscaling cannot instantly close the 2,000 RPS gap. |
+| Survive two simultaneous instance failures at peak | **Result:** At least 12 instances<br>Covers that specific failure assumption, not automatically an AZ loss, burst, or deployment overlap. |
+| New instance takes 90 seconds; weekday demand doubles at 9:00 | **Result:** Pre-scale before 9:00 with startup/health-check buffer<br>Predictable demand should not wait for reactive detection. |
+| 20 instances × 50 DB connections | **Result:** Up to 1,000 connections<br>Pools create downstream demand independently of request volume. |
+| 100 instances × the same 50 connections | **Result:** Up to 5,000 connections<br>A 5× connection increase can happen even at unchanged customer RPS. |
+| DB budget 2,000 connections ÷ 100 instances | **Result:** At most 20 per instance before reserve<br>Allocate less where admin, other services, failover and maintenance need capacity. |
 
 The 12-instance example provides 20% extra capacity above the 10-instance requirement; that is not the same as 20% idle fraction of the provisioned fleet. Runtime headroom must cover expected short-term shocks. A five-year volume forecast informs the roadmap, not the immediate reserve needed before autoscaling reacts.
 
-| Scaling Problem | Design Response | Remaining Trade-off |
-|---|---|---|
-| Service compute saturation | Horizontally scale stateless instances and distribute traffic | More instances multiply connection pools and downstream demand. |
-| One DB leader becomes constrained | Optimize queries/indexes, compute, storage and connections first | Vertical scaling has a ceiling and adds no independent failure domain. |
-| Genuine write/storage ownership limit | Shard after measurement | Routing, rebalancing, hot shards, cross-shard operations and harder recovery. |
-| Gateway pressure | Verify throughput, TLS termination, connection and rate-limit capacity | A gateway is not inherently unlimited. |
-| Hot app instance | Inspect sticky sessions, load-balancer distribution and account affinity | Keep application placement separate from data ownership. |
-| Hot database shard | Rebalance/split ranges, isolate hot accounts, revisit partition key | A single hot account's state cannot necessarily be divided freely; migration is real work. |
-| Sudden or short-lived bursts | Headroom, admission limits and pre-scaling where predictable | Reactive scaling can arrive after the spike. |
-| DB pools fill | Global connection budget, smaller pools, optional proxy, concurrency bounds | Reject or briefly queue excess work instead of manufacturing capacity. |
+| Scaling area | Response and remaining trade-off |
+|---|---|
+| Service compute saturation | Horizontally scale stateless instances and distribute traffic<br>**Trade-off:** More instances multiply connection pools and downstream demand. |
+| One DB leader becomes constrained | Optimize queries/indexes, compute, storage and connections first<br>**Trade-off:** Vertical scaling has a ceiling and adds no independent failure domain. |
+| Genuine write/storage ownership limit | Shard after measurement<br>**Trade-off:** Routing, rebalancing, hot shards, cross-shard operations and harder recovery. |
+| Gateway pressure | Verify throughput, TLS termination, connection and rate-limit capacity<br>**Trade-off:** A gateway is not inherently unlimited. |
+| Hot app instance | Inspect sticky sessions, load-balancer distribution and account affinity<br>**Trade-off:** Keep application placement separate from data ownership. |
+| Hot database shard | Rebalance/split ranges, isolate hot accounts, revisit partition key<br>**Trade-off:** A single hot account's state cannot necessarily be divided freely; migration is real work. |
+| Sudden or short-lived bursts | Headroom, admission limits and pre-scaling where predictable<br>**Trade-off:** Reactive scaling can arrive after the spike. |
+| DB pools fill | Global connection budget, smaller pools, optional proxy, concurrency bounds<br>**Trade-off:** Reject or briefly queue excess work instead of manufacturing capacity. |
 
 ## Reliability & Failure Modes
 
 The dangerous cascade is **slow DB → occupied connections → queue growth → timeouts → retries → more DB pressure**. A dependency can be healthy at the process level while its network path is unreliable or its callers are blocked waiting for capacity.
 
-![Bounded overload response: admission controls, capped concurrency and queueing, fast failure, then bounded backoff and jitter](assets/overload-protection.svg)
-
-| Failure | System Behaviour | Detection | Recovery / Mitigation |
-|---|---|---|---|
-| Service instance crashes | Healthy peers carry admitted traffic | Health checks, errors, per-instance load | Remove unhealthy target; reserve absorbs loss; autoscaling restores capacity. |
-| DB takes 5–10 seconds | Waiting can spread upstream and exhaust shared resources | Dependency latency, pool wait, p99, queues | Timeouts, breaker, concurrency bounds and controlled retries. |
-| DB pool exhausted | Requests wait before query execution | Pool utilization/wait time, queue depth | Brief bounded wait; shed excess; respect global DB budget. |
-| Intermittent network fault | Some calls succeed; others hang/reset; write outcome may be unknown | Connection failures, traces, timeouts | Bound retries; resolve write outcomes through durable IDs. |
-| Retry storm | New retries overlap still-running work | Retry volume, rising latency and dependency demand | Bounded retries, exponential backoff, jitter, admission limits. |
-| Leader fails | Temporary disruption until valid authority exists | Heartbeats, election/leader-change signals | Elect eligible replacement, preserve committed state, redirect clients. |
-| Replica slow or lost | Impact depends on required acknowledgement policy | Replication lag and commit latency | Use policy-compatible healthy replicas; stop when guarantees cannot be met. |
-| Network partition | Majority may continue; minority cannot claim write authority | Lost peer connectivity/quorum | Consensus and authority enforcement; never improvise competing leaders. |
-| Entire authoritative layer unavailable | No safe available-balance read | End-to-end errors, dependency failure | Controlled temporary unavailability; restore/fail over only to a valid authority. |
-| AZ lost | Traffic moves to surviving zones; system is degraded | Zone health, quorum, survivor utilization | Replication must already exist; verify surviving capacity and alert on lost redundancy. |
-| Cache invalidation fails in an extension | Cached balance becomes unsafe | Correctness/version signals where reliably available | Bypass suspect cache; use authoritative store within its capacity. |
-| Cross-shard debit completes; credit fails | Transfer is partially complete | Durable workflow status, pending work | Resume or compensate from durable state; every effect idempotent. |
-| Unauthorized internal calls | Deny affected operations | Authorization denials, correlated security signals | Investigate, contain narrowly, revoke/rotate if needed; preserve safe functions. |
+| Failure | Detection, containment and recovery |
+|---|---|
+| Service instance crashes | **Behaviour:** Healthy peers carry admitted traffic<br>**Detection:** Health checks, errors, per-instance load<br>**Response:** Remove unhealthy target; reserve absorbs loss; autoscaling restores capacity. |
+| DB takes 5–10 seconds | **Behaviour:** Waiting can spread upstream and exhaust shared resources<br>**Detection:** Dependency latency, pool wait, p99, queues<br>**Response:** Timeouts, breaker, concurrency bounds and controlled retries. |
+| DB pool exhausted | **Behaviour:** Requests wait before query execution<br>**Detection:** Pool utilization/wait time, queue depth<br>**Response:** Brief bounded wait; shed excess; respect global DB budget. |
+| Intermittent network fault | **Behaviour:** Some calls succeed; others hang/reset; write outcome may be unknown<br>**Detection:** Connection failures, traces, timeouts<br>**Response:** Bound retries; resolve write outcomes through durable IDs. |
+| Retry storm | **Behaviour:** New retries overlap still-running work<br>**Detection:** Retry volume, rising latency and dependency demand<br>**Response:** Bounded retries, exponential backoff, jitter, admission limits. |
+| Leader fails | **Behaviour:** Temporary disruption until valid authority exists<br>**Detection:** Heartbeats, election/leader-change signals<br>**Response:** Elect eligible replacement, preserve committed state, redirect clients. |
+| Replica slow or lost | **Behaviour:** Impact depends on required acknowledgement policy<br>**Detection:** Replication lag and commit latency<br>**Response:** Use policy-compatible healthy replicas; stop when guarantees cannot be met. |
+| Network partition | **Behaviour:** Majority may continue; minority cannot claim write authority<br>**Detection:** Lost peer connectivity/quorum<br>**Response:** Consensus and authority enforcement; never improvise competing leaders. |
+| Entire authoritative layer unavailable | **Behaviour:** No safe available-balance read<br>**Detection:** End-to-end errors, dependency failure<br>**Response:** Controlled temporary unavailability; restore/fail over only to a valid authority. |
+| AZ lost | **Behaviour:** Traffic moves to surviving zones; system is degraded<br>**Detection:** Zone health, quorum, survivor utilization<br>**Response:** Replication must already exist; verify surviving capacity and alert on lost redundancy. |
+| Cache invalidation fails in an extension | **Behaviour:** Cached balance becomes unsafe<br>**Detection:** Correctness/version signals where reliably available<br>**Response:** Bypass suspect cache; use authoritative store within its capacity. |
+| Cross-shard debit completes; credit fails | **Behaviour:** Transfer is partially complete<br>**Detection:** Durable workflow status, pending work<br>**Response:** Resume or compensate from durable state; every effect idempotent. |
+| Unauthorized internal calls | **Behaviour:** Deny affected operations<br>**Detection:** Authorization denials, correlated security signals<br>**Response:** Investigate, contain narrowly, revoke/rotate if needed; preserve safe functions. |
 
 **Circuit breaker scope.** Closed permits normal calls; open fails fast on the protected dependency path; half-open permits a small number of probes. An open balance-DB breaker does not automatically stop unrelated server operations. Heartbeats and leases help liveness/ownership; they do not replace timeout, breaker and concurrency controls for a slow synchronous dependency.
 
@@ -254,18 +281,18 @@ If A is business-critical, block the unsafe capability while preserving genuinel
 
 ## Observability
 
-| Signal | What it reveals | Decision it supports |
-|---|---|---|
-| p50, p95, p99 and fraction under 200 ms | Typical experience and tail delay | Detect contention/dependency trouble hidden by averages; assess latency SLO. |
-| Availability, error rate, timeouts, 5xx | Customer-visible service outcome | Incident response and release risk. |
-| CPU, memory, in-flight work, per-instance utilization | Application resource pressure and skew | Scale compute only when compute is the constraint. |
-| Pool utilization/wait, queue depth | Waiting before the DB can execute | Bound concurrency, adjust pools, shed work. |
-| DB query/commit latency, throughput, locks, I/O | State-layer bottlenecks | Optimize queries/storage or revisit ownership distribution. |
-| Retry volume, breaker state | Amplification and dependency health | Stop harmful retries; control recovery probes. |
-| Replication lag, quorum, leader changes, AZ headroom | Safety and degraded redundancy | Validate failover readiness before the next fault. |
-| Authorization failures and service identity in audit logs | Unauthorized access and compromised callers | Investigation and selective containment. |
-| Correlated logs and end-to-end traces | Where time/failure entered the request path | Separate gateway, service, network and DB causes. |
-| Error-budget consumption | Reliability tolerance already used | Slow/defer rollout or prioritize repair. |
+| Signal | What it reveals and the decision it supports |
+|---|---|
+| p50, p95, p99 and fraction under 200 ms | Typical experience and tail delay<br>**Decision:** Detect contention/dependency trouble hidden by averages; assess latency SLO. |
+| Availability, error rate, timeouts, 5xx | Customer-visible service outcome<br>**Decision:** Incident response and release risk. |
+| CPU, memory, in-flight work, per-instance utilization | Application resource pressure and skew<br>**Decision:** Scale compute only when compute is the constraint. |
+| Pool utilization/wait, queue depth | Waiting before the DB can execute<br>**Decision:** Bound concurrency, adjust pools, shed work. |
+| DB query/commit latency, throughput, locks, I/O | State-layer bottlenecks<br>**Decision:** Optimize queries/storage or revisit ownership distribution. |
+| Retry volume, breaker state | Amplification and dependency health<br>**Decision:** Stop harmful retries; control recovery probes. |
+| Replication lag, quorum, leader changes, AZ headroom | Safety and degraded redundancy<br>**Decision:** Validate failover readiness before the next fault. |
+| Authorization failures and service identity in audit logs | Unauthorized access and compromised callers<br>**Decision:** Investigation and selective containment. |
+| Correlated logs and end-to-end traces | Where time/failure entered the request path<br>**Decision:** Separate gateway, service, network and DB causes. |
+| Error-budget consumption | Reliability tolerance already used<br>**Decision:** Slow/defer rollout or prioritize repair. |
 
 Healthy CPU/RAM does not establish health. If p99 doubles, inspect DB/network latency, connection waits, retries, lock contention and slow subsets before adding instances. If app utilization is 40% but DB pools are full, scaling the app may make the actual bottleneck worse.
 
@@ -279,47 +306,47 @@ At **90% of the monthly budget consumed halfway through the month**, defer or ti
 
 These mutations test limits of the existing architecture rather than replace it wholesale.
 
-| Original Constraint | New Constraint | What Broke | Architecture Change | New Trade-off |
-|---|---|---|---|---|
-| 20,000 peak RPS | 200,000 RPS for 30 minutes | Gateway/service capacity, then pools/DB may saturate | Verify gateway; scale stateless fleet; cap DB concurrency; shed beyond safe capacity | Throttling protects the system but does not serve all legitimate demand. |
-| Existing fleet size | 10× more service instances | Connection pools multiply | Global budget, smaller per-instance pools, optional proxy | Application scaling remains bounded by state-layer capacity. |
-| Healthy multi-AZ topology | One AZ and DB replica lost | Capacity and voting members disappear | Route to healthy zones; existing replication and safe election | Must alert on degraded redundancy even if users see no failure. |
-| Adequate normal capacity | Lost zone contained 40%; survivors already at 70% | Successful routing can overload survivors | Maintain failure-state headroom and control admitted demand | Redundancy without spare capacity is insufficient. |
-| 99.99% SLO | 30% cost reduction; remove an AZ proposed | Required failure tolerance may disappear | Cut waste/oversizing first; prove quorum and survivor capacity before reducing redundancy | Savings cannot silently weaken the unchanged SLO. |
-| Unconstrained geography | Canadian state stays in Canada; US state stays in US | Cross-border placement and failover options invalid | Constrain processing, replicas, backups and relevant derived data | Residency reduces recovery choices. |
-| Canadian regional availability | Canadian region lost; US failover forbidden | No permitted cross-border recovery path | Use permitted in-country resilience; become unavailable if no valid path exists | Compliance takes priority over serving from prohibited geography. |
-| Normal Canadian demand | Traffic doubles with one AZ in maintenance | Remaining DB/network/compute/connection capacity may be insufficient | Check capacity and quorum before redirecting/admitting demand | Must plan compound events, not isolated ones. |
-| Survivors can carry load | Only at 95% utilization | Almost no room for another shock | Pre-scale or shed non-critical load | Extra capacity costs money but supports recovery. |
-| Normal DB latency | Latency rises; CPU/RAM normal | Waiting may be outside compute | Inspect pool waits, locks, I/O, network, slow queries | Avoid scaling the wrong resource. |
-| Finite pools | Pools full; queues grow | Unbounded work drives memory and latency failure | Bound queue/concurrency and apply backpressure | More controlled 503s may be necessary. |
-| Load shedding active | 503 rate spikes | Unsure whether protection or under-provisioning | Correlate app load, pools, queues, DB and autoscaling ceiling | Response code alone does not locate the bottleneck. |
-| Healthy fleet totals | One service instance hot | Sticky/affinity/routing skew | Even stateless distribution; separate account ownership from app placement | Fleet average hides localized overload. |
-| Even app routing | One DB shard hot | Customer/range workload skew | Split/rebalance/isolate; change key if justified | Resharding is a migration, not a free scaling switch. |
-| Local transaction boundary | Transfer crosses two shards | Debit and credit can complete separately | Durable transfer state, recovery/compensation, idempotent effects | Distributed completion has greater operational complexity. |
-| Debit committed | Credit shard unavailable, later retried | Duplicate credit or orphaned transfer risk | Resume/compensate from durable status with same logical identity | Idempotency alone cannot tell which step remains. |
+| Constraint mutation | Break, response and trade-off |
+|---|---|
+| 20,000 peak RPS | **New constraint:** 200,000 RPS for 30 minutes<br>**What broke:** Gateway/service capacity, then pools/DB may saturate<br>**Change:** Verify gateway; scale stateless fleet; cap DB concurrency; shed beyond safe capacity<br>**Trade-off:** Throttling protects the system but does not serve all legitimate demand. |
+| Existing fleet size | **New constraint:** 10× more service instances<br>**What broke:** Connection pools multiply<br>**Change:** Global budget, smaller per-instance pools, optional proxy<br>**Trade-off:** Application scaling remains bounded by state-layer capacity. |
+| Healthy multi-AZ topology | **New constraint:** One AZ and DB replica lost<br>**What broke:** Capacity and voting members disappear<br>**Change:** Route to healthy zones; existing replication and safe election<br>**Trade-off:** Must alert on degraded redundancy even if users see no failure. |
+| Adequate normal capacity | **New constraint:** Lost zone contained 40%; survivors already at 70%<br>**What broke:** Successful routing can overload survivors<br>**Change:** Maintain failure-state headroom and control admitted demand<br>**Trade-off:** Redundancy without spare capacity is insufficient. |
+| 99.99% SLO | **New constraint:** 30% cost reduction; remove an AZ proposed<br>**What broke:** Required failure tolerance may disappear<br>**Change:** Cut waste/oversizing first; prove quorum and survivor capacity before reducing redundancy<br>**Trade-off:** Savings cannot silently weaken the unchanged SLO. |
+| Unconstrained geography | **New constraint:** Canadian state stays in Canada; US state stays in US<br>**What broke:** Cross-border placement and failover options invalid<br>**Change:** Constrain processing, replicas, backups and relevant derived data<br>**Trade-off:** Residency reduces recovery choices. |
+| Canadian regional availability | **New constraint:** Canadian region lost; US failover forbidden<br>**What broke:** No permitted cross-border recovery path<br>**Change:** Use permitted in-country resilience; become unavailable if no valid path exists<br>**Trade-off:** Compliance takes priority over serving from prohibited geography. |
+| Normal Canadian demand | **New constraint:** Traffic doubles with one AZ in maintenance<br>**What broke:** Remaining DB/network/compute/connection capacity may be insufficient<br>**Change:** Check capacity and quorum before redirecting/admitting demand<br>**Trade-off:** Must plan compound events, not isolated ones. |
+| Survivors can carry load | **New constraint:** Only at 95% utilization<br>**What broke:** Almost no room for another shock<br>**Change:** Pre-scale or shed non-critical load<br>**Trade-off:** Extra capacity costs money but supports recovery. |
+| Normal DB latency | **New constraint:** Latency rises; CPU/RAM normal<br>**What broke:** Waiting may be outside compute<br>**Change:** Inspect pool waits, locks, I/O, network, slow queries<br>**Trade-off:** Avoid scaling the wrong resource. |
+| Finite pools | **New constraint:** Pools full; queues grow<br>**What broke:** Unbounded work drives memory and latency failure<br>**Change:** Bound queue/concurrency and apply backpressure<br>**Trade-off:** More controlled 503s may be necessary. |
+| Load shedding active | **New constraint:** 503 rate spikes<br>**What broke:** Unsure whether protection or under-provisioning<br>**Change:** Correlate app load, pools, queues, DB and autoscaling ceiling<br>**Trade-off:** Response code alone does not locate the bottleneck. |
+| Healthy fleet totals | **New constraint:** One service instance hot<br>**What broke:** Sticky/affinity/routing skew<br>**Change:** Even stateless distribution; separate account ownership from app placement<br>**Trade-off:** Fleet average hides localized overload. |
+| Even app routing | **New constraint:** One DB shard hot<br>**What broke:** Customer/range workload skew<br>**Change:** Split/rebalance/isolate; change key if justified<br>**Trade-off:** Resharding is a migration, not a free scaling switch. |
+| Local transaction boundary | **New constraint:** Transfer crosses two shards<br>**What broke:** Debit and credit can complete separately<br>**Change:** Durable transfer state, recovery/compensation, idempotent effects<br>**Trade-off:** Distributed completion has greater operational complexity. |
+| Debit committed | **New constraint:** Credit shard unavailable, later retried<br>**What broke:** Duplicate credit or orphaned transfer risk<br>**Change:** Resume/compensate from durable status with same logical identity<br>**Trade-off:** Idempotency alone cannot tell which step remains. |
 
 Additional foundation exercises tested predictable 9:00 AM bursts, 90-second startup, two-instance failure reserve, asynchronous replica staleness, synchronous replica loss, and network partitions. Their calculations and policies are preserved above.
 
 ## Adversarial Architecture Review
 
-| Challenge | Initial Thinking | Final Reasoning | Principle Learned |
-|---|---|---|---|
-| Where should state live? | Cross-server replication between balance instances | Keep app instances stateless; persist authoritative state centrally/logically | Replicate state in the owning layer. |
-| What should own balances? | Redis | Durable transactional balance/ledger store | A fast copy is not automatically financial authority. |
-| Could versions rescue the cache? | Compare cache version with DB each time | Adds DB work and still needs a sound freshness protocol | An optimization must preserve correctness and retain measurable benefit. |
-| Can every read use replicas? | Separate write primary from many read replicas | Asynchronous lag violates the available-balance promise | Read scaling is constrained by semantics. |
-| What is over-engineered at 20,000 RPS? | Scaling DB instances aggressively | Start with a logical primary and HA; measure before sharding | Do not pay distributed complexity before the workload needs it. |
-| What assumption needs testing? | Concurrent/peak capacity and latency | Prove full-path p95/p99, pools, bursts, autoscaling and failover | Capacity arithmetic is not production evidence. |
-| Biggest remaining SPOF? | Hot accounts on one shard | Hot shard is a concentrated bottleneck; leader without failover, shared edge/network/security dependency or region can be broader SPOFs | Performance concentration and single points of failure differ. |
-| What would simplify the baseline? | Remove caching | Remove Redis from critical reads when DB can meet the target | Simplification can improve correctness and operability. |
-| How keep latency low without Redis? | More leader/replica coordination | First optimize queries, indexes, pools, network and capacity | More coordination can add latency. |
-| When add Redis back? | Invalidate/update within 200 ms | Demonstrated need plus safe correctness under invalidation failure | Fast normal operation is insufficient evidence. |
-| Does autoscaling fix DB pressure? | Add instances | Each instance adds pools; control global concurrency | Scale callers in the context of dependency limits. |
-| Does ACID imply fresh replica reads? | No stale reads should be possible | Primary transaction can be ACID while another copy lags | Transaction correctness and distributed visibility differ. |
-| Does a DB commit resolve a timeout? | The commit tells us success | The caller may never receive that response | Unknown outcomes require durable identity and reconciliation. |
-| Does idempotency solve a stuck transfer? | Idempotency alone | Also persist progress and recovery state | Duplicate prevention and workflow recovery are separate. |
-| Is channel authorization enough? | Avoid repeated checks to reduce load | Service enforces account entitlement for every supported caller | Security must hold at the resource boundary. |
-| Is a maintenance window enough for AI resharding? | Execute in a safe window | Also validate, simulate, approve, back up and define abort/rollback controls | Timing is only one execution safeguard. |
+| Challenge | Initial thinking, final reasoning and principle |
+|---|---|
+| Where should state live? | **Initial:** Cross-server replication between balance instances<br>**Final:** Keep app instances stateless; persist authoritative state centrally/logically<br>**Principle:** Replicate state in the owning layer. |
+| What should own balances? | **Initial:** Redis<br>**Final:** Durable transactional balance/ledger store<br>**Principle:** A fast copy is not automatically financial authority. |
+| Could versions rescue the cache? | **Initial:** Compare cache version with DB each time<br>**Final:** Adds DB work and still needs a sound freshness protocol<br>**Principle:** An optimization must preserve correctness and retain measurable benefit. |
+| Can every read use replicas? | **Initial:** Separate write primary from many read replicas<br>**Final:** Asynchronous lag violates the available-balance promise<br>**Principle:** Read scaling is constrained by semantics. |
+| What is over-engineered at 20,000 RPS? | **Initial:** Scaling DB instances aggressively<br>**Final:** Start with a logical primary and HA; measure before sharding<br>**Principle:** Do not pay distributed complexity before the workload needs it. |
+| What assumption needs testing? | **Initial:** Concurrent/peak capacity and latency<br>**Final:** Prove full-path p95/p99, pools, bursts, autoscaling and failover<br>**Principle:** Capacity arithmetic is not production evidence. |
+| Biggest remaining SPOF? | **Initial:** Hot accounts on one shard<br>**Final:** Hot shard is a concentrated bottleneck; leader without failover, shared edge/network/security dependency or region can be broader SPOFs<br>**Principle:** Performance concentration and single points of failure differ. |
+| What would simplify the baseline? | **Initial:** Remove caching<br>**Final:** Remove Redis from critical reads when DB can meet the target<br>**Principle:** Simplification can improve correctness and operability. |
+| How keep latency low without Redis? | **Initial:** More leader/replica coordination<br>**Final:** First optimize queries, indexes, pools, network and capacity<br>**Principle:** More coordination can add latency. |
+| When add Redis back? | **Initial:** Invalidate/update within 200 ms<br>**Final:** Demonstrated need plus safe correctness under invalidation failure<br>**Principle:** Fast normal operation is insufficient evidence. |
+| Does autoscaling fix DB pressure? | **Initial:** Add instances<br>**Final:** Each instance adds pools; control global concurrency<br>**Principle:** Scale callers in the context of dependency limits. |
+| Does ACID imply fresh replica reads? | **Initial:** No stale reads should be possible<br>**Final:** Primary transaction can be ACID while another copy lags<br>**Principle:** Transaction correctness and distributed visibility differ. |
+| Does a DB commit resolve a timeout? | **Initial:** The commit tells us success<br>**Final:** The caller may never receive that response<br>**Principle:** Unknown outcomes require durable identity and reconciliation. |
+| Does idempotency solve a stuck transfer? | **Initial:** Idempotency alone<br>**Final:** Also persist progress and recovery state<br>**Principle:** Duplicate prevention and workflow recovery are separate. |
+| Is channel authorization enough? | **Initial:** Avoid repeated checks to reduce load<br>**Final:** Service enforces account entitlement for every supported caller<br>**Principle:** Security must hold at the resource boundary. |
+| Is a maintenance window enough for AI resharding? | **Initial:** Execute in a safe window<br>**Final:** Also validate, simulate, approve, back up and define abort/rollback controls<br>**Principle:** Timing is only one execution safeguard. |
 
 ## AI Intersection
 
@@ -340,21 +367,21 @@ Additional foundation exercises tested predictable 9:00 AM bursts, 90-second sta
 
 The Technical Program Manager (TPM) translates this architecture into dependencies, integration evidence and accountable launch decisions.
 
-| Workstream | Dependencies | Parallelizable? | Major Deliverable |
-|---|---|---|---|
-| API / Platform | Interface and identity model; downstream capacity assumptions | Yes, with service/security design | Gateway, routing, throttling, authentication integration, service exposure. |
-| Balance Service | API contract, authoritative access patterns, security policies | Yes; partial environments/mocks unblock work | Read behavior, authorization, idempotency where needed, backpressure and failure handling. |
-| Database / Platform | Data/consistency requirements and technology/topology decisions | Design can start early alongside others | Schema/indexes, HA/replication/failover, access, connection budget and performance baseline. |
-| Security | Caller/resource model; deployment and data boundaries | Yes, early; can become launch-critical | Token model, mTLS, authorization, secrets/certificates, least privilege, validation. |
-| SRE / Observability | Enough API/service/security shape to identify signals | Design/instrument during build | SLIs/SLOs, dashboards, alerts, traces, capacity signals, runbooks. |
-| QA / Integration | Contracts early; functioning components for full validation | Planning/component work early | Functional, end-to-end, load, resilience, failover and security evidence. |
-| Implementation / Release | Environments, tested integration, operational and security readiness | Plan early; execution gated | Deployment sequence, rollout/rollback readiness, final Go/No-Go. |
+| Workstream | Dependencies, sequencing and deliverable |
+|---|---|
+| API / Platform | **Dependencies:** Interface and identity model; downstream capacity assumptions<br>**Sequencing:** Yes, with service/security design<br>**Deliverable:** Gateway, routing, throttling, authentication integration, service exposure. |
+| Balance Service | **Dependencies:** API contract, authoritative access patterns, security policies<br>**Sequencing:** Yes; partial environments/mocks unblock work<br>**Deliverable:** Read behavior, authorization, idempotency where needed, backpressure and failure handling. |
+| Database / Platform | **Dependencies:** Data/consistency requirements and technology/topology decisions<br>**Sequencing:** Design can start early alongside others<br>**Deliverable:** Schema/indexes, HA/replication/failover, access, connection budget and performance baseline. |
+| Security | **Dependencies:** Caller/resource model; deployment and data boundaries<br>**Sequencing:** Yes, early; can become launch-critical<br>**Deliverable:** Token model, mTLS, authorization, secrets/certificates, least privilege, validation. |
+| SRE / Observability | **Dependencies:** Enough API/service/security shape to identify signals<br>**Sequencing:** Design/instrument during build<br>**Deliverable:** SLIs/SLOs, dashboards, alerts, traces, capacity signals, runbooks. |
+| QA / Integration | **Dependencies:** Contracts early; functioning components for full validation<br>**Sequencing:** Planning/component work early<br>**Deliverable:** Functional, end-to-end, load, resilience, failover and security evidence. |
+| Implementation / Release | **Dependencies:** Environments, tested integration, operational and security readiness<br>**Sequencing:** Plan early; execution gated<br>**Deliverable:** Deployment sequence, rollout/rollback readiness, final Go/No-Go. |
 
 ### Sequence and critical path
 
 **Data/consistency requirements → DB choice and HA topology → schema/access patterns → usable data-layer milestone → end-to-end integration → performance/resilience/security evidence → production readiness.**
 
-API, service, DB/platform and security design can proceed in parallel once interfaces and responsibility boundaries are sufficiently clear. The user's observability sequencing clarification was accepted: begin design/instrumentation during the build, once the system has enough shape, rather than waiting for finished implementation.
+API, service, DB/platform and security design can proceed in parallel once interfaces and responsibility boundaries are sufficiently clear. Observability design and instrumentation begin during the build as soon as the system has enough shape; they do not wait for finished implementation.
 
 DB/platform is the likely primary technical critical path because the full request path cannot be proven without the authoritative store. Security can be a parallel launch gate. A critical path is established by dependency impact, not by calling one team important; there was no fully dated schedule from which to calculate it mechanically.
 
@@ -375,18 +402,18 @@ State the current condition, quantify the exposure, connect it to customer/busin
 
 ## Program Risks
 
-| Risk | Impact | Early Signal | Mitigation | Contingency |
-|---|---|---|---|---|
-| DB/platform readiness slip | Blocks genuine integration and failover/performance proof | Schema/connectivity/topology milestone delay | Resolve dependencies early and baseline performance | Mocks/partial environment for independent work; escalate residual scope/date/resource trade-off. |
-| Security arrives late | Launch-critical authorization or certificate issue | Unresolved policy model; repeated security-test failures | Parallel security work and early trust-boundary decisions | Verified compensating control or launch escalation. |
-| Capacity assumptions unproven | Peak or failover outage | Tail latency/pool pressure under realistic load | Full-path load and failure tests | Pre-scale, bound demand, revise capacity before launch. |
-| Over-sharding / unnecessary cache | Extra delivery dependencies and correctness failure modes | Complexity grows before a measured bottleneck | Optimize simple authoritative baseline | Defer unnecessary components. |
-| Observability delayed | Integration failures hard to diagnose; weak operations | Missing traces, SLIs, queue/pool metrics | Start once architecture has enough definition | Readiness gate prevents unobservable launch. |
-| Retry / connection amplification | Scaling action triggers DB outage | Pools/connections/retries rise with fleet growth | Global budgets and bounded work | Shed traffic and restore dependency health. |
-| Cost cuts remove failure capacity | Availability promise unsupported | Proposed AZ removal; high survivor utilization | Validate quorum and headroom in failure state | Retain required redundancy; seek savings elsewhere. |
-| Residency constrains recovery | Otherwise viable failover is impermissible | Cross-border replica/backup/processing dependency | Design geography constraints into topology | Controlled unavailability when no permitted recovery exists. |
-| Error budget nearly exhausted | Major release increases reliability exposure | 90% consumption halfway through window | Prioritize causes, reduce non-essential change | Leadership decision on bounded scope and residual risk. |
-| Unproven rollback / recovery | Failed release or transfer leaves unsafe state | Happy-path tests pass but recovery evidence absent | Test rollback/failover and durable recovery behavior | Stop release or recover through validated procedures. |
+| Risk surfaced | Signal, mitigation and contingency |
+|---|---|
+| DB/platform readiness slip | **Impact:** Blocks genuine integration and failover/performance proof<br>**Early signal:** Schema/connectivity/topology milestone delay<br>**Mitigation:** Resolve dependencies early and baseline performance<br>**Contingency:** Mocks/partial environment for independent work; escalate residual scope/date/resource trade-off. |
+| Security arrives late | **Impact:** Launch-critical authorization or certificate issue<br>**Early signal:** Unresolved policy model; repeated security-test failures<br>**Mitigation:** Parallel security work and early trust-boundary decisions<br>**Contingency:** Verified compensating control or launch escalation. |
+| Capacity assumptions unproven | **Impact:** Peak or failover outage<br>**Early signal:** Tail latency/pool pressure under realistic load<br>**Mitigation:** Full-path load and failure tests<br>**Contingency:** Pre-scale, bound demand, revise capacity before launch. |
+| Over-sharding / unnecessary cache | **Impact:** Extra delivery dependencies and correctness failure modes<br>**Early signal:** Complexity grows before a measured bottleneck<br>**Mitigation:** Optimize simple authoritative baseline<br>**Contingency:** Defer unnecessary components. |
+| Observability delayed | **Impact:** Integration failures hard to diagnose; weak operations<br>**Early signal:** Missing traces, SLIs, queue/pool metrics<br>**Mitigation:** Start once architecture has enough definition<br>**Contingency:** Readiness gate prevents unobservable launch. |
+| Retry / connection amplification | **Impact:** Scaling action triggers DB outage<br>**Early signal:** Pools/connections/retries rise with fleet growth<br>**Mitigation:** Global budgets and bounded work<br>**Contingency:** Shed traffic and restore dependency health. |
+| Cost cuts remove failure capacity | **Impact:** Availability promise unsupported<br>**Early signal:** Proposed AZ removal; high survivor utilization<br>**Mitigation:** Validate quorum and headroom in failure state<br>**Contingency:** Retain required redundancy; seek savings elsewhere. |
+| Residency constrains recovery | **Impact:** Otherwise viable failover is impermissible<br>**Early signal:** Cross-border replica/backup/processing dependency<br>**Mitigation:** Design geography constraints into topology<br>**Contingency:** Controlled unavailability when no permitted recovery exists. |
+| Error budget nearly exhausted | **Impact:** Major release increases reliability exposure<br>**Early signal:** 90% consumption halfway through window<br>**Mitigation:** Prioritize causes, reduce non-essential change<br>**Contingency:** Leadership decision on bounded scope and residual risk. |
+| Unproven rollback / recovery | **Impact:** Failed release or transfer leaves unsafe state<br>**Early signal:** Happy-path tests pass but recovery evidence absent<br>**Mitigation:** Test rollback/failover and durable recovery behavior<br>**Contingency:** Stop release or recover through validated procedures. |
 
 ## TPM Constraint Mutations
 
@@ -411,53 +438,85 @@ The proper fix takes two weeks. The initial proposal was vulnerability assessmen
 
 **What must the TPM bring?** The vulnerability, customer/regulatory impact, feasible controls, residual risk, permanent-fix timing and consequence of delay. Accountable owners must resolve the launch decision. For a non-regulatory release, postponement was the preferred response rather than accepting unnecessary risk.
 
+## Production Readiness
+
+These are **release requirements, not completed tests or signoffs**. Evidence, thresholds, and accountable owners must be assigned before Go/No-Go.
+
+| Gate | Evidence required before Go |
+|---|---|
+| Development / component validation | Account lookup and authorization, strong-read routing, idempotency enforcement where updates exist, connection budgets, timeouts, and bounded dependency behavior. |
+| End-to-end integration | Channel → gateway → balance service → authoritative DB → response works with real security context, logging, traces, and controlled failure behavior. |
+| Performance / capacity | Representative peak, bursts, concurrent demand, p95/p99, queue and pool behavior, gateway limits, and autoscaling startup are measured across the full path. |
+| Resilience / HA | Service-instance loss, slow DB, pool exhaustion, retry pressure, leader failure, replica loss, AZ loss, network partition, and survivor headroom are exercised. |
+| Data / recovery | Commit and read policies, election eligibility, fencing, backups, restore, failover, failback, and any durable operation recovery are demonstrated. |
+| Security / InfoSec | Service and customer identity, account authorization, token misuse, mTLS, least privilege, credential rotation, auditability, and containment are validated. |
+| Operational readiness | SLIs/SLOs, dashboards, alert thresholds, capacity assumptions, on-call ownership, incident procedures, and executable runbooks are ready. |
+| Final Go / No-Go | Gate evidence, accepted residual risks, decision owners, customer-impact limits, rollback readiness, and any time-bounded exception are recorded. |
+
+Exact latency, error-rate, pool-utilization, replica-lag, recovery-time, recovery-point, and rollback thresholds remain to be defined. Drill values are scenarios, not production acceptance criteria.
+
+## Rollout & Rollback
+
+Use **internal validation → shadow observation where safe → small canary → selected traffic or channels → progressive expansion → full rollout**. Shadow traffic must remain side-effect-free; balance-changing operations must never be duplicated merely to compare systems.
+
+| Trigger | Action and recovery check |
+|---|---|
+| Incorrect balance or authorization result | Stop expansion and route traffic to the last-known-good path.<br>**Recovery check:** Re-run correctness and entitlement tests against representative accounts before resuming. |
+| Latency, errors, queues, or DB pools breach agreed limits | Freeze or reduce exposure; inspect gateway, service, network and database saturation.<br>**Recovery check:** Resume only after thresholds hold under representative load and failure headroom is restored. |
+| Retry volume or breaker openings rise | Reduce admitted demand and stop amplification before tuning capacity.<br>**Recovery check:** Verify bounded retries, backoff, jitter, dependency recovery, and stable queue depth. |
+| Replication, quorum, or leader eligibility is uncertain | Stop balance-changing exposure and do not promote an arbitrary replica.<br>**Recovery check:** Establish one valid authority, preserve committed history, and verify client routing. |
+| Security control weakens or exploit path appears | Disable or restrict the affected operation and invoke the security decision process.<br>**Recovery check:** Validate the permanent fix or compensating control and obtain accountable approval. |
+| Rollout remains healthy | Expand gradually while monitoring customer outcomes, p99, errors, pools, database health, authorization failures, and error-budget burn.<br>**Recovery check:** Preserve a deployable last-known-good version and tested traffic rollback path. |
+
+**Production clarification.** Rolling back application code does not reverse a committed balance update, repair inconsistent workflow state, remove unsafe cached data, or restore database authority. Code rollback, traffic rollback, data recovery, cache invalidation, and failback are separate operations with separate evidence.
+
 ## Concepts Learned
 
-| Concept | Meaning | Why It Matters | Example From This Architecture |
-|---|---|---|---|
-| Functional requirement | What the system must do | Defines capability | Return current available balance across channels. |
-| Non-functional requirement | Required quality/constraint | Drives topology and trade-offs | 20,000 RPS, under 200 ms, 99.99%, strong reads. |
-| RPS / concurrency | Requests per second / simultaneous work | Population is not demand; rate is not in-flight count | Ten million customers did not size the fleet by itself. |
-| Source of truth | Authoritative state owner | Resolves which copy governs correctness | Transactional balance/ledger store. |
-| Stateless service | Does not own independent durable customer state | Enables replacement and even routing | Every instance reads the authoritative layer. |
-| Load balancer (LB) | Routes across healthy targets | Distributes load and removes failed instances | Avoid one server carrying all traffic. |
-| Horizontal / vertical scaling | More instances / larger instance | Capacity and failure-domain effects differ | App scale-out versus larger DB leader. |
-| Headroom | Spare capacity for defined shocks | Autoscaling is delayed | Twelve instances to tolerate two losses in the exercise. |
-| Pre-scaling | Capacity ready before expected load | Handles predictable peaks | Provision ahead of the 9:00 burst and 90-second startup. |
-| DB instance / node | Running member of a database system | Makes topology concrete | One leader plus two replicas equals three instances. |
-| Replica / shard | Copy of state / separate owned subset | Availability and write distribution are different | Replicas do not distribute one leader's write ownership. |
-| Replication lag | Delay propagating/applying changes | Creates stale reads | Replica shows $2,000 after primary reaches $1,500. |
-| Strong / eventual consistency | Immediate required visibility / convergence after delay | Select by business semantics | Available balance versus a likes counter. |
-| ACID | Atomicity, Consistency, Isolation, Durability | Transaction guarantees need separate reasoning | All-or-nothing transfer with preserved rules and committed state. |
-| Atomicity / idempotency | One execution all-or-nothing / repeats add no effect | Neither substitutes for the other | Transfer commits once despite retry. |
-| Race / unique constraint | Concurrent check-then-act gap / authoritative uniqueness rule | App timing cannot enforce financial correctness | Simultaneous duplicate IDs cannot both commit. |
-| Ambiguous outcome | Caller does not know whether work committed | Blind retry can duplicate effects | DB commit succeeds but response is lost. |
-| Durable workflow state | Persisted progress and recovery status | Enables safe resume/compensation | Debit done, credit pending, same transfer ID. |
-| Acknowledgement policy | Required confirmations for commit | Determines replica-loss behavior | Any-one versus all-replica requirement. |
-| Quorum / consensus | Required agreement / protocol establishing consistent decisions | Prevents isolated authority under correct rules | Two of three votes; eligible leader election. |
-| Split brain | Competing authorities for the same state | Can create conflicting balances | Two nodes independently accept account updates. |
-| Network partition | Nodes cannot communicate despite possibly being alive | Failure suspicion is not proof of death | Majority and minority groups form. |
-| CAP | Consistency, Availability, Partition tolerance | Partition forces a visibility/response trade-off | Money-critical minority rejects unsafe operations. |
-| AZ / failure domain | Availability Zone / shared scope of failure | Copies must survive independent faults | Cross-zone replicas and survivor capacity. |
-| HA / SPOF | High Availability / Single Point of Failure | Redundancy must cover the actual dependency | One unprotected authoritative DB can stop all reads. |
-| Connection amplification | Fleet growth multiplies DB pools | App scale-out can destabilize DB | 20×50 connections grows to 100×50. |
-| Bounded queue / backpressure | Limited waiting / upstream flow response | Prevents unlimited memory and latency growth | Queue briefly, then reject when DB capacity is full. |
-| Throttling | Admission rate/policy control | Protects system before work enters | Gateway rejects over-limit traffic. |
-| Timeout / circuit breaker | Limit wait / stop calls to unhealthy path | Contains slow dependency damage | Open breaker fails fast; half-open probes recovery. |
-| Retry storm / backoff / jitter | Amplification / increasing delay / randomized timing | Recovery must not recreate overload | Thousands of clients avoid synchronized retries. |
-| 429 / 503 / Retry-After | Rate limited / temporarily unable / retry timing hint | Communicates why work was rejected | DB saturation produces controlled 503s. |
-| Tail latency | Slow end of request distribution | Averages hide customer pain | p99 rises despite healthy CPU. |
-| SLI / SLO / SLA | Indicator / objective / agreement | Measurement, target and contract differ | Actual latency versus 200 ms target versus remedies. |
-| Error budget | Tolerable unreliability under the SLO | Connects reliability to delivery | Reduce risky releases at 90% consumed. |
-| Authentication / authorization | Identity / permitted action and resource | Logged-in users do not own every account | Customer 123 must be entitled to Account 456. |
-| TLS / mTLS | Transport security / mutual endpoint authentication | Protects transport and service identity | Trusted connection still requires account checks. |
-| OAuth / scope | Delegated access framework / permission extent | Limits actions on behalf of a user/service | Balance-read permission cannot authorize updates. |
-| Least privilege / zero trust | Minimum permissions / no implicit network trust | Reduces compromise blast radius | Separate service credentials and explicit policy. |
-| KMS / PKI | Key Management Service / Public Key Infrastructure | Keys, secrets and certificates need lifecycle controls | Safe issuance, rotation and revocation. |
-| Graceful degradation | Preserve safe capability during partial failure | Continuity must not bypass security | Deny unsafe update while permitted reads continue. |
-| Data residency | Constraints on geography of data/processing | Limits failover and backup choices | Canadian data cannot fail over to prohibited US placement. |
-| Critical path | Dependencies whose delay moves completion | Directs delivery recovery | DB readiness gates meaningful end-to-end validation. |
-| Compensating control | Alternative control addressing the actual exploit path | Supports a bounded exception only with evidence | Disable affected operation pending permanent fix. |
+| Concept | Working meaning / correction |
+|---|---|
+| Functional requirement | What the system must do<br>**Why:** Defines capability<br>**Example:** Return current available balance across channels. |
+| Non-functional requirement | Required quality/constraint<br>**Why:** Drives topology and trade-offs<br>**Example:** 20,000 RPS, under 200 ms, 99.99%, strong reads. |
+| RPS / concurrency | Requests per second / simultaneous work<br>**Why:** Population is not demand; rate is not in-flight count<br>**Example:** Ten million customers did not size the fleet by itself. |
+| Source of truth | Authoritative state owner<br>**Why:** Resolves which copy governs correctness<br>**Example:** Transactional balance/ledger store. |
+| Stateless service | Does not own independent durable customer state<br>**Why:** Enables replacement and even routing<br>**Example:** Every instance reads the authoritative layer. |
+| Load balancer (LB) | Routes across healthy targets<br>**Why:** Distributes load and removes failed instances<br>**Example:** Avoid one server carrying all traffic. |
+| Horizontal / vertical scaling | More instances / larger instance<br>**Why:** Capacity and failure-domain effects differ<br>**Example:** App scale-out versus larger DB leader. |
+| Headroom | Spare capacity for defined shocks<br>**Why:** Autoscaling is delayed<br>**Example:** Twelve instances to tolerate two losses in the exercise. |
+| Pre-scaling | Capacity ready before expected load<br>**Why:** Handles predictable peaks<br>**Example:** Provision ahead of the 9:00 burst and 90-second startup. |
+| DB instance / node | Running member of a database system<br>**Why:** Makes topology concrete<br>**Example:** One leader plus two replicas equals three instances. |
+| Replica / shard | Copy of state / separate owned subset<br>**Why:** Availability and write distribution are different<br>**Example:** Replicas do not distribute one leader's write ownership. |
+| Replication lag | Delay propagating/applying changes<br>**Why:** Creates stale reads<br>**Example:** Replica shows $2,000 after primary reaches $1,500. |
+| Strong / eventual consistency | Immediate required visibility / convergence after delay<br>**Why:** Select by business semantics<br>**Example:** Available balance versus a likes counter. |
+| ACID | Atomicity, Consistency, Isolation, Durability<br>**Why:** Transaction guarantees need separate reasoning<br>**Example:** All-or-nothing transfer with preserved rules and committed state. |
+| Atomicity / idempotency | One execution all-or-nothing / repeats add no effect<br>**Why:** Neither substitutes for the other<br>**Example:** Transfer commits once despite retry. |
+| Race / unique constraint | Concurrent check-then-act gap / authoritative uniqueness rule<br>**Why:** App timing cannot enforce financial correctness<br>**Example:** Simultaneous duplicate IDs cannot both commit. |
+| Ambiguous outcome | Caller does not know whether work committed<br>**Why:** Blind retry can duplicate effects<br>**Example:** DB commit succeeds but response is lost. |
+| Durable workflow state | Persisted progress and recovery status<br>**Why:** Enables safe resume/compensation<br>**Example:** Debit done, credit pending, same transfer ID. |
+| Acknowledgement policy | Required confirmations for commit<br>**Why:** Determines replica-loss behavior<br>**Example:** Any-one versus all-replica requirement. |
+| Quorum / consensus | Required agreement / protocol establishing consistent decisions<br>**Why:** Prevents isolated authority under correct rules<br>**Example:** Two of three votes; eligible leader election. |
+| Split brain | Competing authorities for the same state<br>**Why:** Can create conflicting balances<br>**Example:** Two nodes independently accept account updates. |
+| Network partition | Nodes cannot communicate despite possibly being alive<br>**Why:** Failure suspicion is not proof of death<br>**Example:** Majority and minority groups form. |
+| CAP | Consistency, Availability, Partition tolerance<br>**Why:** Partition forces a visibility/response trade-off<br>**Example:** Money-critical minority rejects unsafe operations. |
+| AZ / failure domain | Availability Zone / shared scope of failure<br>**Why:** Copies must survive independent faults<br>**Example:** Cross-zone replicas and survivor capacity. |
+| HA / SPOF | High Availability / Single Point of Failure<br>**Why:** Redundancy must cover the actual dependency<br>**Example:** One unprotected authoritative DB can stop all reads. |
+| Connection amplification | Fleet growth multiplies DB pools<br>**Why:** App scale-out can destabilize DB<br>**Example:** 20×50 connections grows to 100×50. |
+| Bounded queue / backpressure | Limited waiting / upstream flow response<br>**Why:** Prevents unlimited memory and latency growth<br>**Example:** Queue briefly, then reject when DB capacity is full. |
+| Throttling | Admission rate/policy control<br>**Why:** Protects system before work enters<br>**Example:** Gateway rejects over-limit traffic. |
+| Timeout / circuit breaker | Limit wait / stop calls to unhealthy path<br>**Why:** Contains slow dependency damage<br>**Example:** Open breaker fails fast; half-open probes recovery. |
+| Retry storm / backoff / jitter | Amplification / increasing delay / randomized timing<br>**Why:** Recovery must not recreate overload<br>**Example:** Thousands of clients avoid synchronized retries. |
+| 429 / 503 / Retry-After | Rate limited / temporarily unable / retry timing hint<br>**Why:** Communicates why work was rejected<br>**Example:** DB saturation produces controlled 503s. |
+| Tail latency | Slow end of request distribution<br>**Why:** Averages hide customer pain<br>**Example:** p99 rises despite healthy CPU. |
+| SLI / SLO / SLA | Indicator / objective / agreement<br>**Why:** Measurement, target and contract differ<br>**Example:** Actual latency versus 200 ms target versus remedies. |
+| Error budget | Tolerable unreliability under the SLO<br>**Why:** Connects reliability to delivery<br>**Example:** Reduce risky releases at 90% consumed. |
+| Authentication / authorization | Identity / permitted action and resource<br>**Why:** Logged-in users do not own every account<br>**Example:** Customer 123 must be entitled to Account 456. |
+| TLS / mTLS | Transport security / mutual endpoint authentication<br>**Why:** Protects transport and service identity<br>**Example:** Trusted connection still requires account checks. |
+| OAuth / scope | Delegated access framework / permission extent<br>**Why:** Limits actions on behalf of a user/service<br>**Example:** Balance-read permission cannot authorize updates. |
+| Least privilege / zero trust | Minimum permissions / no implicit network trust<br>**Why:** Reduces compromise blast radius<br>**Example:** Separate service credentials and explicit policy. |
+| KMS / PKI | Key Management Service / Public Key Infrastructure<br>**Why:** Keys, secrets and certificates need lifecycle controls<br>**Example:** Safe issuance, rotation and revocation. |
+| Graceful degradation | Preserve safe capability during partial failure<br>**Why:** Continuity must not bypass security<br>**Example:** Deny unsafe update while permitted reads continue. |
+| Data residency | Constraints on geography of data/processing<br>**Why:** Limits failover and backup choices<br>**Example:** Canadian data cannot fail over to prohibited US placement. |
+| Critical path | Dependencies whose delay moves completion<br>**Why:** Directs delivery recovery<br>**Example:** DB readiness gates meaningful end-to-end validation. |
+| Compensating control | Alternative control addressing the actual exploit path<br>**Why:** Supports a bounded exception only with evidence<br>**Example:** Disable affected operation pending permanent fix. |
 
 ## Mental Models
 

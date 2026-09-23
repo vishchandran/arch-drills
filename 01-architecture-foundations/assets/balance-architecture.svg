@@ -3,10 +3,10 @@
 <desc id="desc">Final baseline • 20,000 peak requests / second. 1  Banking channels Mobile, web, ATM and contact centre Verifiable customer / security context 2  Gateway + load balancer Authenticate and throttle incoming work Route to healthy service instances 3  Stateless balance services Fleet distributed across availability zones Authorize service, customer and account 4  Bounded dependency access Timeouts, circuit breaker, concurrency caps DB pools share a global connection budget 5  Authoritative database Read through valid leader / strong policy Return committed balance; no Redis hop 6  Replication and recovery HA replicas across separate failure zones Backups are a separate recovery path. Response returns through the request path.
 Metrics, logs and traces observe every stage.</desc>
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10" fill="#42647b"/></marker></defs>
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="white"/>
 <g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
 <text x="28" y="40" font-size="25" font-weight="700">Available balance architecture</text>
-<text x="28" y="74" font-size="18" fill="#465d6d">Final baseline • 20,000 peak requests / second</text>
+<text x="28" y="74" font-size="18" fill="#162b3b">Final baseline • 20,000 peak requests / second</text>
 <rect x="28" y="124" width="504" height="120" rx="12" fill="#eff6fb" stroke="#6b97b3" stroke-width="1.5"/>
 <text x="48" y="156" font-size="22" font-weight="700">1  Banking channels</text>
 <text x="48" y="189" font-size="20" font-weight="400">Mobile, web, ATM and contact centre</text>
@@ -36,6 +36,6 @@ Metrics, logs and traces observe every stage.</desc>
 <text x="48" y="956" font-size="22" font-weight="700">6  Replication and recovery</text>
 <text x="48" y="989" font-size="20" font-weight="400">HA replicas across separate failure zones</text>
 <text x="48" y="1018" font-size="20" font-weight="400">Backups are a separate recovery path</text>
-<text x="28" y="1095" font-size="17" fill="#465d6d">Response returns through the request path.</text>
-<text x="28" y="1120" font-size="17" fill="#465d6d">Metrics, logs and traces observe every stage.</text>
+<text x="28" y="1095" font-size="17" fill="#162b3b">Response returns through the request path.</text>
+<text x="28" y="1120" font-size="17" fill="#162b3b">Metrics, logs and traces observe every stage.</text>
 </g></svg>
