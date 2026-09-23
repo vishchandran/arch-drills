@@ -1,6 +1,6 @@
 # Topic 2 — URL Shortener
 
-[Back to Architecture Drills](../Main%20Readme/README.md)
+[Back to Architecture Drills](../Main%20Readme.md)
 
 **Status:** Complete
 
