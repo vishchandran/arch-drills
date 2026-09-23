@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="770" viewBox="0 0 440 770" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">URL creation path</title>
+<desc id="desc">Validate a long URL and operation key, commit the mapping and operation result durably, Base62 encode the numeric identifier, warm the cache, and return one short URL.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">URL creation path</text>
+<rect x="20" y="64" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="92" font-size="20" font-weight="700">Create request</text>
+<text x="34" y="120" font-size="19">Validate long URL + operation key</text>
+<text x="34" y="148" font-size="19">Return prior result for a valid retry</text>
+<path d="M220 168 V194" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="204" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="232" font-size="20" font-weight="700">Authoritative transaction</text>
+<text x="34" y="260" font-size="19">DB generates the numeric identifier</text>
+<text x="34" y="288" font-size="19">Commit mapping + operation result</text>
+<path d="M220 308 V334" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="344" width="400" height="104" rx="12" fill="#fff6df" stroke="#c79d42"/>
+<text x="34" y="372" font-size="20" font-weight="700">Durability policy satisfied</text>
+<text x="34" y="400" font-size="19">Primary + eligible replica policy</text>
+<text x="34" y="428" font-size="19">Do not expose an unsafe mapping</text>
+<path d="M220 448 V474" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="484" width="400" height="104" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="34" y="512" font-size="20" font-weight="700">Encode and warm cache</text>
+<text x="34" y="540" font-size="19">Base62 numeric ID → short code</text>
+<text x="34" y="568" font-size="19">Cache numeric ID → long URL</text>
+<path d="M220 588 V614" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="624" width="400" height="104" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
+<text x="34" y="652" font-size="20" font-weight="700">Return one short URL</text>
+<text x="34" y="680" font-size="19">Cache failure does not undo commit</text>
+<text x="34" y="708" font-size="19">Same operation key → same result</text>
+</g></svg>
