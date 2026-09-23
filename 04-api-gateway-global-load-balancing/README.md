@@ -8,6 +8,8 @@ A multi-region banking platform is the vehicle for learning API policy enforceme
 
 The drill evolved from one Canadian region to Canada, US, and Europe. A specific single-writer, five-minute recovery scenario selected **active-passive with a warm US standby**; later mutations change residency and recovery requirements. Decisions, rejected proposals, and corrections are retained below. Numerical scenarios are teaching assumptions, not measured production capacities.
 
+The architecture is intentionally layered by responsibility rather than product. DNS resolves an entry point, global traffic management selects an eligible region, regional load balancing selects a gateway instance, the gateway enforces API policy, and internal balancing selects a service instance. Exact vendors, SLOs, replication contracts, retry budgets, and named owners remain implementation decisions.
+
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
@@ -37,21 +39,23 @@ The drill evolved from one Canadian region to Canada, US, and Europe. A specific
 
 Expose mobile/web banking, payments, balances, login, OTP, beneficiaries, cards, accounts, partner APIs, and internal operational APIs. Callers include browsers, mobile apps, ATMs, merchants, fintechs, partner banks, and batch systems across Canada, US, and Europe.
 
-| Requirement | Established in the drill | Consequence |
-|---|---|---|
-| API entry | Route by API/path/method/version; authenticate, coarse authorize, validate, rate-limit, apply quotas | A gateway is more than a forwarding hop. |
-| Regional resilience | Multiple gateway and service instances; multiple AZs | Balance each target pool independently and size for an AZ loss. |
-| Gateway sizing exercise | 40,000 RPS peak; 10,000 RPS per gateway; three AZs | Eight gateways in a 3/3/2 split retain 50,000 RPS after the worst AZ loss. |
-| Global routing | Health, capacity, geography, latency, priority, weights, tenant and residency policies | Regional LBs alone lack the cross-region decision function. |
-| Single-writer DR scenario | Canada primary; US DR; five-minute RTO; avoid concurrent write conflicts | Warm active-passive is sufficient if readiness and recovery are proven. |
-| Failover capacity exercise | Canada 80,000 RPS; US 120,000 RPS; US safe ceiling 150,000 RPS | Only 30,000 RPS spare before further reserve; full failover overloads US. |
-| Operational safety | Low latency, high availability, security, observability, safe config changes and rollback | Management failures and deployments must not create global request-path outages. |
+| Requirement | Decision and consequence |
+|---|---|
+| API entry | Route by API/path/method/version; authenticate, coarse authorize, validate, rate-limit, apply quotas<br>**Consequence:** A gateway is more than a forwarding hop. |
+| Regional resilience | Multiple gateway and service instances; multiple AZs<br>**Consequence:** Balance each target pool independently and size for an AZ loss. |
+| Gateway sizing exercise | 40,000 RPS peak; 10,000 RPS per gateway; three AZs<br>**Consequence:** Eight gateways in a 3/3/2 split retain 50,000 RPS after the worst AZ loss. |
+| Global routing | Health, capacity, geography, latency, priority, weights, tenant and residency policies<br>**Consequence:** Regional LBs alone lack the cross-region decision function. |
+| Single-writer DR scenario | Canada primary; US DR; five-minute RTO; avoid concurrent write conflicts<br>**Consequence:** Warm active-passive is sufficient if readiness and recovery are proven. |
+| Failover capacity exercise | Canada 80,000 RPS; US 120,000 RPS; US safe ceiling 150,000 RPS<br>**Consequence:** Only 30,000 RPS spare before further reserve; full failover overloads US. |
+| Operational safety | Low latency, high availability, security, observability, safe config changes and rollback<br>**Consequence:** Management failures and deployments must not create global request-path outages. |
 
-**Scope boundary.** These are distinct exercises, not one combined capacity forecast. The opening brief's illustrative 200,000 RPS sizing example was replaced by the completed 40,000 RPS regional exercise. The later 200,000 → 2 million RPS mutation is global. Exact production SLOs, RPO, replication topology, quota consistency, health thresholds, retry budgets, vendors, costs, and named delivery owners were not finalized. Residency is a scenario constraint, not a statement of banking law.
+These are distinct exercises, not one combined capacity forecast. The 40,000 RPS gateway exercise is regional; the later 200,000 → 2 million RPS mutation is global. Residency is a scenario constraint, not a statement of banking law.
 
 ## Final Architecture
 
 The SVG diagrams separate global selection, the repeated regional path, and configuration distribution to keep each view readable on GitHub web and mobile.
+
+### Global region selection
 
 ![Global entry and eligible region selection](assets/global-entry.svg)
 
@@ -59,11 +63,15 @@ The SVG diagrams separate global selection, the repeated regional path, and conf
 
 **DNS clarification.** DNS resolves the endpoint before the API connection; it does not proxy the HTTP request. With DNS steering, region selection influences the DNS answer and the client connects to regional ingress. With a global proxy, DNS resolves the global entry and that entry forwards to an eligible region. The diagram shows logical responsibilities, not a requirement to deploy both mechanisms as serial network hops. Edge WAF/DDoS controls apply before traffic consumes regional application capacity.
 
+### Regional request path
+
 ![Regional request path from ingress to downstream dependencies](assets/regional-request-path.svg)
 
 [Open the scalable diagram](assets/regional-request-path.svg)
 
 Each region repeats this path across AZs. The WAF may be integrated into global/edge ingress rather than deployed as a separate regional appliance. Internal balancing can use service discovery, a service LB, a Kubernetes Service, a mesh proxy, or client-side balancing. The requirement is healthy instance selection, not another mandatory appliance.
+
+### Control and data planes
 
 ![Global control plane distributes configuration to regional data planes](assets/control-plane.svg)
 
@@ -83,57 +91,57 @@ The control plane defines routes, auth policies, rate-limit policies, tenant quo
 
 ## Component Responsibilities
 
-| Component | Responsibility | Failure impact / boundary |
-|---|---|---|
-| DNS | Resolve hostname to global or regional entry | Cached answers can delay a DNS-based traffic shift. |
-| GLB / GTM | Select eligible region; apply health, capacity and steering policy | Bad health signals or policy can send traffic to an unsafe destination. It consumes readiness; it does not replicate databases. |
-| Edge DDoS / WAF | Protect infrastructure and filter application attacks | WAF alone is not volumetric DDoS protection. |
-| Regional LB | Balance healthy gateway instances; health checks, removal, connections | Does not replace global region selection or the gateway's API policy role. |
-| Gateway data plane | Auth, coarse authorization, rate limits, validation, API/version routing, justified header changes/transformation | Avoid business logic and instance-local customer sessions. |
-| Internal balancing | Select healthy banking-service instances | Independent target pool and scaling from the gateway fleet. |
-| Banking services | Resource authorization, domain rules, operation state, downstream protection | Account ownership, payment fees, eligibility, and fraud decisions belong here. |
-| Regional dependencies | Identity/session capability, enforcement stores, databases and downstream services | A healthy gateway is insufficient when its dependencies cannot serve. |
-| Control plane / distribution | Define, validate, version, distribute and govern config | Existing serving capacity must not require a live central call per request. |
-| Telemetry / asynchronous AI | Diagnose, forecast and recommend governed changes | Analysis failure must not block normal API traffic. |
+| Component | Responsibility / boundary |
+|---|---|
+| DNS | Resolve hostname to global or regional entry<br>**Boundary:** Cached answers can delay a DNS-based traffic shift. |
+| GLB / GTM | Select eligible region; apply health, capacity and steering policy<br>**Boundary:** Bad health signals or policy can send traffic to an unsafe destination. It consumes readiness; it does not replicate databases. |
+| Edge DDoS / WAF | Protect infrastructure and filter application attacks<br>**Boundary:** WAF alone is not volumetric DDoS protection. |
+| Regional LB | Balance healthy gateway instances; health checks, removal, connections<br>**Boundary:** Does not replace global region selection or the gateway's API policy role. |
+| Gateway data plane | Auth, coarse authorization, rate limits, validation, API/version routing, justified header changes/transformation<br>**Boundary:** Avoid business logic and instance-local customer sessions. |
+| Internal balancing | Select healthy banking-service instances<br>**Boundary:** Independent target pool and scaling from the gateway fleet. |
+| Banking services | Resource authorization, domain rules, operation state, downstream protection<br>**Boundary:** Account ownership, payment fees, eligibility, and fraud decisions belong here. |
+| Regional dependencies | Identity/session capability, enforcement stores, databases and downstream services<br>**Boundary:** A healthy gateway is insufficient when its dependencies cannot serve. |
+| Control plane / distribution | Define, validate, version, distribute and govern config<br>**Boundary:** Existing serving capacity must not require a live central call per request. |
+| Telemetry / asynchronous AI | Diagnose, forecast and recommend governed changes<br>**Boundary:** Analysis failure must not block normal API traffic. |
 
 **Overlap correction.** L7 load balancers can implement some gateway features. Separation here defines ownership and blast radius, not a claim that products have mutually exclusive capabilities. Consolidation is reasonable when it preserves these boundaries and simplifies operations.
 
 ## Key Architecture Decisions
 
-| Decision / disposition | Why | Alternative and trade-off |
-|---|---|---|
-| **Accepted:** regional LB before gateway fleet; internal balancing after it | Both gateway and service tiers need healthy instance selection | Moving the only LB behind the gateway leaves gateway distribution unresolved. |
-| **Accepted:** stateless gateways; no sticky sessions by default | Freely balance, scale, drain, restart and fail over | Stickiness creates skew and state coupling; legacy/connection-oriented exceptions need justification. |
-| **Rejected:** one regional component owns DNS, global steering, WAF, API policy and balancing | Scaling mismatch, coupled changes, troubleshooting difficulty and broad blast radius | Logical separation need not mean one appliance per function. |
-| **Rejected:** business rules in the gateway to save a hop | Couples infrastructure changes to banking correctness | Domain services own balances, beneficiaries, fees, eligibility and fraud logic. |
-| **Accepted:** residency and safety before latency | The nearest region can be illegal or unsafe for a workload | Geo routing is a preference, not proof of eligibility. |
-| **Accepted for five-minute DR:** warm active-passive | Canada retains normal write authority; simpler conflict management | Active-active adds readiness and operational benefits when justified by requirements. |
-| **Rejected:** DNS change instantly moves every client | Cached answers and existing connection behavior delay movement | Global proxy steering removes dependence on per-client DNS refresh for backend changes. |
-| **Rejected:** fail over all traffic regardless of spare capacity | 200,000 RPS cannot fit a 150,000 RPS safe ceiling | Admit eligible priority traffic and shed/degrade excess. |
-| **Rejected:** blindly retry in-flight payments elsewhere | A committed payment can have a lost response | Use idempotency and operation-status reconciliation for uncertain outcomes. |
-| **Accepted:** regional self-sufficiency and cached config | Canada failure should not disable US authentication or routing | Replicate/synchronize outside normal synchronous cross-region request dependencies. |
-| **Accepted:** validate, version, canary, observe, progressively deploy, roll back | One bad auth/route policy must not fail all regions | Last-known-good alone provides recovery, not deployment prevention. |
-| **Rejected:** synchronous AI region choice on every request | Adds latency, nondeterminism, failure coupling and broad blast radius | AI recommends asynchronously; deterministic controls govern changes. |
+| Decision / disposition | Rationale and trade-off |
+|---|---|
+| **Accepted:** regional LB before gateway fleet; internal balancing after it | Both gateway and service tiers need healthy instance selection<br>**Trade-off:** Moving the only LB behind the gateway leaves gateway distribution unresolved. |
+| **Accepted:** stateless gateways; no sticky sessions by default | Freely balance, scale, drain, restart and fail over<br>**Trade-off:** Stickiness creates skew and state coupling; legacy/connection-oriented exceptions need justification. |
+| **Rejected:** one regional component owns DNS, global steering, WAF, API policy and balancing | Scaling mismatch, coupled changes, troubleshooting difficulty and broad blast radius<br>**Trade-off:** Logical separation need not mean one appliance per function. |
+| **Rejected:** business rules in the gateway to save a hop | Couples infrastructure changes to banking correctness<br>**Trade-off:** Domain services own balances, beneficiaries, fees, eligibility and fraud logic. |
+| **Accepted:** residency and safety before latency | The nearest region can be illegal or unsafe for a workload<br>**Trade-off:** Geo routing is a preference, not proof of eligibility. |
+| **Accepted for five-minute DR:** warm active-passive | Canada retains normal write authority; simpler conflict management<br>**Trade-off:** Active-active adds readiness and operational benefits when justified by requirements. |
+| **Rejected:** DNS change instantly moves every client | Cached answers and existing connection behavior delay movement<br>**Trade-off:** Global proxy steering removes dependence on per-client DNS refresh for backend changes. |
+| **Rejected:** fail over all traffic regardless of spare capacity | 200,000 RPS cannot fit a 150,000 RPS safe ceiling<br>**Trade-off:** Admit eligible priority traffic and shed/degrade excess. |
+| **Rejected:** blindly retry in-flight payments elsewhere | A committed payment can have a lost response<br>**Trade-off:** Use idempotency and operation-status reconciliation for uncertain outcomes. |
+| **Accepted:** regional self-sufficiency and cached config | Canada failure should not disable US authentication or routing<br>**Trade-off:** Replicate/synchronize outside normal synchronous cross-region request dependencies. |
+| **Accepted:** validate, version, canary, observe, progressively deploy, roll back | One bad auth/route policy must not fail all regions<br>**Trade-off:** Last-known-good alone provides recovery, not deployment prevention. |
+| **Rejected:** synchronous AI region choice on every request | Adds latency, nondeterminism, failure coupling and broad blast radius<br>**Trade-off:** AI recommends asynchronously; deterministic controls govern changes. |
 
 ## DNS & Global Traffic Steering
 
-| Policy | Example / role | Limit |
-|---|---|---|
-| Geographic | Prefer Canada for Canadian traffic | Location alone does not establish account residency permissions. |
-| Latency-based | Prefer the lowest-latency eligible healthy region | Apply after safety and residency constraints. |
-| Weighted | Canada 80% / US 20% during migration | Weights require observation and capacity validation. |
-| Priority | Canada primary, US secondary | Health checks determine when to activate the lower-priority destination. |
-| Health-aware | Remove a failing region from eligible destinations | A heartbeat alone does not prove complete application readiness. |
-| Capacity-aware | Avoid regions near their safe limit | Need downstream-aware capacity signals and admission protection. |
+| Policy | Use and safety boundary |
+|---|---|
+| Geographic | Prefer Canada for Canadian traffic<br>**Boundary:** Location alone does not establish account residency permissions. |
+| Latency-based | Prefer the lowest-latency eligible healthy region<br>**Boundary:** Apply after safety and residency constraints. |
+| Weighted | Canada 80% / US 20% during migration<br>**Boundary:** Weights require observation and capacity validation. |
+| Priority | Canada primary, US secondary<br>**Boundary:** Health checks determine when to activate the lower-priority destination. |
+| Health-aware | Remove a failing region from eligible destinations<br>**Boundary:** A heartbeat alone does not prove complete application readiness. |
+| Capacity-aware | Avoid regions near their safe limit<br>**Boundary:** Need downstream-aware capacity signals and admission protection. |
 
 In the completed example, Canada is at **95% capacity**, US at **45%**, US adds **20 ms**, and no residency restriction applies: prefer US. The ordering is **regulatory constraints → system safety → availability → latency optimization**, with workload and maintenance policies also respected.
 
-| Mechanism | Benefit | Trade-off / decision |
-|---|---|---|
-| Low DNS TTL | More frequent refresh can shorten stale routing | More DNS queries and resolution dependency; not a hard failover-time guarantee. |
-| High DNS TTL | More caching and fewer lookups | Routing updates take longer to reach cached clients. Choose by required change responsiveness, not traffic volume alone. |
-| DNS-based failover | Changes answers toward healthy destinations | Authoritative updates do not invalidate all resolver/client caches; some answers persist longer than expected. |
-| Global proxy / Anycast-style ingress | Can steer to another backend without every client refreshing DNS | Adds global ingress operations, health-policy complexity and cost; timing must be tested. |
+| Mechanism | Benefit and trade-off |
+|---|---|
+| Low DNS TTL | More frequent refresh can shorten stale routing<br>**Trade-off:** More DNS queries and resolution dependency; not a hard failover-time guarantee. |
+| High DNS TTL | More caching and fewer lookups<br>**Trade-off:** Routing updates take longer to reach cached clients. Choose by required change responsiveness, not traffic volume alone. |
+| DNS-based failover | Changes answers toward healthy destinations<br>**Trade-off:** Authoritative updates do not invalidate all resolver/client caches; some answers persist longer than expected. |
+| Global proxy / Anycast-style ingress | Can steer to another backend without every client refreshing DNS<br>**Trade-off:** Adds global ingress operations, health-policy complexity and cost; timing must be tested. |
 
 **Scenario nuance retained.** A high TTL can be reasonable with one endpoint and genuinely no alternate destination or expected rapid routing change. That does not make single-AZ deployment resilient. DNS responsiveness also matters for maintenance, migrations, capacity shifts, and canaries, not only outages.
 
@@ -143,11 +151,11 @@ In the completed example, Canada is at **95% capacity**, US at **45%**, US adds 
 
 **Stateless gateway does not mean stateless system.** Any healthy gateway should process the next request using a signed token or an appropriately shared session platform. Instance-local login sessions fail under ordinary balancing, instance restart, and regional failover. Persisted session dependencies must themselves meet regional recovery requirements.
 
-| Pattern | Selected use / benefit | Cost and consistency obligation |
-|---|---|---|
-| Active-active | Both regions serve; destination capacity is already live | Typically greater operational complexity; concurrent writes require ownership/conflict design. Active-active ingress does not require multi-writer data. |
-| Warm active-passive | Selected for Canada write authority and five-minute RTO | Keep standby capacity, data, config, certificates and IAM ready; rehearse promotion and failback. |
-| Cold standby | Lower readiness spend in principle | Longer provisioning/recovery; not selected for the five-minute scenario. |
+| Pattern | Use and consistency obligation |
+|---|---|
+| Active-active | Both regions serve; destination capacity is already live<br>**Obligation:** Typically greater operational complexity; concurrent writes require ownership/conflict design. Active-active ingress does not require multi-writer data. |
+| Warm active-passive | Selected for Canada write authority and five-minute RTO<br>**Obligation:** Keep standby capacity, data, config, certificates and IAM ready; rehearse promotion and failback. |
+| Cold standby | Lower readiness spend in principle<br>**Obligation:** Longer provisioning/recovery; not selected for the five-minute scenario. |
 
 Active-passive simplifies the normal single-writer model but does not remove replication or correctness work. GLB consumes application/data readiness rather than performing synchronization itself. **RTO** measures recovery time; **RPO** measures tolerable data loss. No final RPO or replication-lag threshold was agreed.
 
@@ -157,12 +165,12 @@ Active-passive simplifies the normal single-writer model but does not remove rep
 
 ## Scaling
 
-| Fleet option at 10,000 RPS per gateway | Worst AZ loss | Result against 40,000 RPS peak |
-|---|---|---|
-| Four gateways | Normal capacity already equals peak | No normal headroom; fails the resilience requirement. |
-| Five, split 2/2/1 | Three survive: 30,000 RPS | Normal headroom does not survive an AZ loss. |
-| Six, split 2/2/2 | Four survive: 40,000 RPS | Meets demand exactly, with zero failure headroom. |
-| **Eight, split 3/3/2** | **Five survive: 50,000 RPS** | **10,000 RPS spare: 25% above peak demand, or 20% of surviving capacity.** |
+| Fleet option | Failure result against 40,000 RPS peak |
+|---|---|
+| Four gateways | Normal capacity already equals peak<br>**Result:** No normal headroom; fails the resilience requirement. |
+| Five, split 2/2/1 | Three survive: 30,000 RPS<br>**Result:** Normal headroom does not survive an AZ loss. |
+| Six, split 2/2/2 | Four survive: 40,000 RPS<br>**Result:** Meets demand exactly, with zero failure headroom. |
+| **Eight, split 3/3/2** | **Five survive: 50,000 RPS**<br>**Result:** **10,000 RPS spare: 25% above peak demand, or 20% of surviving capacity.** |
 
 Capacity planning must use the worst credible failure, representative API mix, auth cost, connections, downstream limits and measured per-instance safe throughput. Autoscaling supplements provisioned failure headroom; it does not create instant capacity.
 
@@ -187,31 +195,31 @@ Load shedding must reduce work. An unbounded payment queue relocates overload an
 
 **Failover sequence:** detect sustained failure → evaluate approved target health, capacity, identity/certificates and data readiness → apply routing policy → serve through the target regional LB and gateway fleet. DNS updates apply only to DNS steering; global proxies can change backend selection separately. Predetermined thresholds must bound the decision; do not wait indefinitely to discover every in-flight operation.
 
-| Failure | Chosen behavior | Protection / limit |
-|---|---|---|
-| Gateway instance or AZ fails | Remove unhealthy targets and use surviving capacity | Stateless sessions and measured failure headroom. |
-| Region fails | Move only eligible traffic within verified destination capacity | Dependency readiness, residency, priority admission and customer impact matter alongside health. |
-| Brief disturbance: three failed checks over about five seconds | Reject automatic 100% failover | Corroborate failure, use predefined thresholds, staged shifts and hysteresis to avoid storms. |
-| Unknown payment outcome | Reconcile operation status and retry only safely | Never infer transaction status from a generic heartbeat. |
-| Retries at client, gateway and service | Choose one deliberate retry layer; bounded attempts/deadline, backoff and jitter | Circuit breakers/retry budgets prevent amplification; writes require idempotency. |
-| US calls Canadian auth synchronously | Remove normal cross-region dependency | US must retain regionally usable identity/auth capability during Canada's failure. |
-| Control plane unavailable for one hour | Serve with last-known-good regional config; alert | New routes, tenant changes, quota/security updates and certificate lifecycle work may be delayed. |
-| Bad configuration | Stop expansion and restore last-known-good | Validation, canary and versioning reduce blast radius before recovery is needed. |
-| Canada recovers | Prove sustained health/capacity, warm up, gradually increase new-traffic weight | US-accepted payments normally finish there; do not move them mid-flight. |
+| Failure | Containment and recovery |
+|---|---|
+| Gateway instance or AZ fails | Remove unhealthy targets and use surviving capacity<br>**Protection:** Stateless sessions and measured failure headroom. |
+| Region fails | Move only eligible traffic within verified destination capacity<br>**Protection:** Dependency readiness, residency, priority admission and customer impact matter alongside health. |
+| Brief disturbance: three failed checks over about five seconds | Reject automatic 100% failover<br>**Protection:** Corroborate failure, use predefined thresholds, staged shifts and hysteresis to avoid storms. |
+| Unknown payment outcome | Reconcile operation status and retry only safely<br>**Protection:** Never infer transaction status from a generic heartbeat. |
+| Retries at client, gateway and service | Choose one deliberate retry layer; bounded attempts/deadline, backoff and jitter<br>**Protection:** Circuit breakers/retry budgets prevent amplification; writes require idempotency. |
+| US calls Canadian auth synchronously | Remove normal cross-region dependency<br>**Protection:** US must retain regionally usable identity/auth capability during Canada's failure. |
+| Control plane unavailable for one hour | Serve with last-known-good regional config; alert<br>**Protection:** New routes, tenant changes, quota/security updates and certificate lifecycle work may be delayed. |
+| Bad configuration | Stop expansion and restore last-known-good<br>**Protection:** Validation, canary and versioning reduce blast radius before recovery is needed. |
+| Canada recovers | Prove sustained health/capacity, warm up, gradually increase new-traffic weight<br>**Protection:** US-accepted payments normally finish there; do not move them mid-flight. |
 
 **Retry arithmetic correction.** The conversation used `3 × 3 × 3 = 27` as an amplification illustration. That assumes three total attempts at each layer. If each layer makes three retries *after* its initial attempt, the worst-case illustration is `4 × 4 × 4 = 64`. Specify attempts versus retries in the actual policy.
 
 ## Security
 
-| Control | Primary placement | Boundary |
-|---|---|---|
-| Volumetric DDoS protection | As far upstream as possible | Avoid consuming regional LB/gateway capacity with attack traffic. |
-| WAF / application attack filtering | Edge/global ingress | SQL injection, XSS, malicious payloads, bot/protocol abuse; not a replacement for upstream DDoS controls. |
-| TLS | Edge or gateway termination, with protected onward transport | Re-encrypt internally; use mTLS for service/partner trust where required. |
-| Token validation and coarse authorization | API Gateway | Check token validity and permission such as `payments:create`. |
-| Resource/business authorization | Banking service | Determine whether this customer may debit account 123, including ownership and restrictions. |
-| API rate limits / tenant quotas | Gateway and regional enforcement mechanism | Coarse edge limits and downstream admission remain complementary. |
-| Certificates / trust material | Managed lifecycle; locally usable in each serving region | Rotation, expiry and standby readiness must be tested. |
+| Control | Placement and boundary |
+|---|---|
+| Volumetric DDoS protection | As far upstream as possible<br>**Boundary:** Avoid consuming regional LB/gateway capacity with attack traffic. |
+| WAF / application attack filtering | Edge/global ingress<br>**Boundary:** SQL injection, XSS, malicious payloads, bot/protocol abuse; not a replacement for upstream DDoS controls. |
+| TLS | Edge or gateway termination, with protected onward transport<br>**Boundary:** Re-encrypt internally; use mTLS for service/partner trust where required. |
+| Token validation and coarse authorization | API Gateway<br>**Boundary:** Check token validity and permission such as `payments:create`. |
+| Resource/business authorization | Banking service<br>**Boundary:** Determine whether this customer may debit account 123, including ownership and restrictions. |
+| API rate limits / tenant quotas | Gateway and regional enforcement mechanism<br>**Boundary:** Coarse edge limits and downstream admission remain complementary. |
+| Certificates / trust material | Managed lifecycle; locally usable in each serving region<br>**Boundary:** Rotation, expiry and standby readiness must be tested. |
 
 For `POST /accounts/123/payments`, a token with `payments:create` does not authorize debiting someone else's account. Both gateway API permission and service resource authorization are required. Domain services understand the business operation, but need not know which gateway instance handled it.
 
@@ -243,13 +251,13 @@ Metrics show something is wrong; logs describe events; traces locate behavior ac
 
 ## Constraint Mutations
 
-| Changed constraint | Accepted response | Incomplete proposal / correction |
-|---|---|---|
-| Global traffic grows from about 200K to 2M RPS | Inspect auth/introspection, shared rate-limit stores, downstreams/databases, expensive gateway work and telemetry | Do not assume global/regional LBs fail first. A globally shared Redis limiter sized for 200K can saturate before ingress. Actual first bottleneck requires measurement. |
-| All Canadian banking traffic must stay in Canada | Restrict to approved Canadian destinations; scale domestically and prioritize/shed under saturation | Lower US latency cannot override residency. If Region A fails, use approved Canadian Region B; reject safely if no compliant destination exists. |
-| Canada is healthy but 90% saturated under residency restriction | Preserve critical capacity, scale within Canada, apply admission and backpressure | Jitter spreads retries; it is not a general cure for a slow region. |
-| Failover must redirect traffic in under ten seconds | Consider live destinations plus global proxy/Anycast-style ingress with continuous health evaluation | Active-active solves destination readiness, not stale DNS. Verify the complete recovery path against the target. |
-| Global control plane unavailable for one hour | Continue regional enforcement with last-known-good config | Management adaptability degrades; monitor expiry, freshness, delayed security updates and capacity changes. |
+| Changed constraint | Response and correction |
+|---|---|
+| Global traffic grows from about 200K to 2M RPS | Inspect auth/introspection, shared rate-limit stores, downstreams/databases, expensive gateway work and telemetry<br>**Correction:** Do not assume global/regional LBs fail first. A globally shared Redis limiter sized for 200K can saturate before ingress. Actual first bottleneck requires measurement. |
+| All Canadian banking traffic must stay in Canada | Restrict to approved Canadian destinations; scale domestically and prioritize/shed under saturation<br>**Correction:** Lower US latency cannot override residency. If Region A fails, use approved Canadian Region B; reject safely if no compliant destination exists. |
+| Canada is healthy but 90% saturated under residency restriction | Preserve critical capacity, scale within Canada, apply admission and backpressure<br>**Correction:** Jitter spreads retries; it is not a general cure for a slow region. |
+| Failover must redirect traffic in under ten seconds | Consider live destinations plus global proxy/Anycast-style ingress with continuous health evaluation<br>**Correction:** Active-active solves destination readiness, not stale DNS. Verify the complete recovery path against the target. |
+| Global control plane unavailable for one hour | Continue regional enforcement with last-known-good config<br>**Correction:** Management adaptability degrades; monitor expiry, freshness, delayed security updates and capacity changes. |
 
 **Coverage boundary.** The opening brief also proposed tenant-60% isolation, expired standby certificates and regional gateway latency as optional separate mutations. They were not completed as standalone Q&A scenarios. Certificate readiness and capacity isolation remain relevant production gates; they are not recorded as completed mutation decisions.
 
@@ -282,20 +290,20 @@ For “Canada may exceed safe capacity in 15 minutes; shift 20% of eligible traf
 
 ## TPM Delivery
 
-| Outcome-based workstream | Completion evidence / dependency | Accountable function to assign |
-|---|---|---|
-| Global Traffic Management | Approved DNS/proxy strategy, steering policies, regional health integration | Traffic/network platform |
-| Regional Gateway & LB Platform | Multi-AZ fleets, health checks, scaling, measured failure capacity | Gateway/platform |
-| Security & Identity Integration | WAF/TLS, regional auth, certificates and authorization contracts | Security/IAM with platform |
-| Application & Downstream Onboarding | API routes, domain authorization, idempotency, dependency readiness | Application/service owners |
-| Multi-Region Readiness & DR | Replication readiness, promotion/failover/failback and target capacity | Data/platform with SRE |
-| E2E Integration & UAT | Representative customer journeys across integrated components | Integration/QA with business owners |
-| Performance & Capacity Validation | Peak load, dependency bottlenecks, AZ/region loss and overload evidence | Performance/service owners |
-| Observability & SRE Readiness | SLIs/SLOs, alerts, runbooks, ownership, operational handover | SRE with service owners |
+| Outcome-based workstream | Evidence and accountable function |
+|---|---|
+| Global Traffic Management | Approved DNS/proxy strategy, steering policies, regional health integration<br>**Accountable function:** Traffic/network platform |
+| Regional Gateway & LB Platform | Multi-AZ fleets, health checks, scaling, measured failure capacity<br>**Accountable function:** Gateway/platform |
+| Security & Identity Integration | WAF/TLS, regional auth, certificates and authorization contracts<br>**Accountable function:** Security/IAM with platform |
+| Application & Downstream Onboarding | API routes, domain authorization, idempotency, dependency readiness<br>**Accountable function:** Application/service owners |
+| Multi-Region Readiness & DR | Replication readiness, promotion/failover/failback and target capacity<br>**Accountable function:** Data/platform with SRE |
+| E2E Integration & UAT | Representative customer journeys across integrated components<br>**Accountable function:** Integration/QA with business owners |
+| Performance & Capacity Validation | Peak load, dependency bottlenecks, AZ/region loss and overload evidence<br>**Accountable function:** Performance/service owners |
+| Observability & SRE Readiness | SLIs/SLOs, alerts, runbooks, ownership, operational handover<br>**Accountable function:** SRE with service owners |
 
 Workstreams describe deliverable outcomes; development teams, InfoSec and networking are contributors, not outcome names. Functional ownership above consolidates the drill into a usable plan; named individuals, milestone dates and staffing were not assigned.
 
-### Critical path and dependencies
+### Critical path
 
 ![TPM critical path from global traffic foundation to production rollout](assets/critical-path.svg)
 
@@ -311,40 +319,38 @@ Track each external dependency with an owner, required-by date, status, delay im
 
 ### RAID classification retained
 
-| Item | Classification | Correction / next action |
-|---|---|---|
-| GLB vendor may miss its committed date | **Risk** | Validate delivery confidence and prepare an alternative before the dependency becomes critical. |
-| US can absorb 30% of Canadian failover traffic | **Assumption** | Prove with workload/capacity tests; do not confuse 30% with 30K RPS. |
-| Canada certificate deployment is currently failing | **Issue** | Active blocker needs an owner, fix and retest. |
-| Performance testing awaits a production-like environment | **Dependency** | Track environment readiness and required-by date. |
-| Regulatory routing approval not confirmed | **Dependency / Risk** | Becomes an issue when rejection or missed timing actively blocks delivery. |
+| Item | Classification and next action |
+|---|---|
+| GLB vendor may miss its committed date | **Risk**<br>**Next action:** Validate delivery confidence and prepare an alternative before the dependency becomes critical. |
+| US can absorb 30% of Canadian failover traffic | **Assumption**<br>**Next action:** Prove with workload/capacity tests; do not confuse 30% with 30K RPS. |
+| Canada certificate deployment is currently failing | **Issue**<br>**Next action:** Active blocker needs an owner, fix and retest. |
+| Performance testing awaits a production-like environment | **Dependency**<br>**Next action:** Track environment readiness and required-by date. |
+| Regulatory routing approval not confirmed | **Dependency / Risk**<br>**Next action:** Becomes an issue when rejection or missed timing actively blocks delivery. |
 
 Risk = might happen; assumption = believed true pending validation; issue = happening now; dependency = something needed from elsewhere.
 
-| Risk consolidated from the drill | Mitigation / trigger | Contingency / accountable function |
-|---|---|---|
-| Vendor or environment delay moves the critical path | Track milestone evidence and latest safe delivery date | Re-sequence, phase, assess a validated alternative or move launch; TPM/platform. |
-| Residency approval is unavailable | Keep routing eligibility explicit; escalate before required-by date | Restrict launch/routing scope to approved regions; compliance/business with TPM. |
-| Failover overloads US | Prove spare capacity, reserves and priority shedding | Shed/degrade lower-priority work or use another approved target; capacity/SRE. |
-| Standby is reachable but auth, TLS or data is unready | Test the full recovery path and certificate rotation | Hold promotion/launch until safe; security/data/platform. |
-| Bad config or AI recommendation affects all regions | Validate, limit change size, canary and audit | Restore last-known-good and stop expansion; control-plane/SRE. |
-| Duplicate writes or retry storms during recovery | Validate idempotency, operation status and retry budgets | Reconcile uncertain work; halt unsafe admission; service/data owners. |
-| Scope or deadline pressure removes operational safeguards | Make mandatory gates visible in the executive decision | Phase scope or move date; TPM with Security/SRE. |
+| Risk | Mitigation, contingency and owner |
+|---|---|
+| Vendor or environment delay moves the critical path | Track milestone evidence and latest safe delivery date<br>**Contingency / owner:** Re-sequence, phase, assess a validated alternative or move launch; TPM/platform. |
+| Residency approval is unavailable | Keep routing eligibility explicit; escalate before required-by date<br>**Contingency / owner:** Restrict launch/routing scope to approved regions; compliance/business with TPM. |
+| Failover overloads US | Prove spare capacity, reserves and priority shedding<br>**Contingency / owner:** Shed/degrade lower-priority work or use another approved target; capacity/SRE. |
+| Standby is reachable but auth, TLS or data is unready | Test the full recovery path and certificate rotation<br>**Contingency / owner:** Hold promotion/launch until safe; security/data/platform. |
+| Bad config or AI recommendation affects all regions | Validate, limit change size, canary and audit<br>**Contingency / owner:** Restore last-known-good and stop expansion; control-plane/SRE. |
+| Duplicate writes or retry storms during recovery | Validate idempotency, operation status and retry budgets<br>**Contingency / owner:** Reconcile uncertain work; halt unsafe admission; service/data owners. |
+| Scope or deadline pressure removes operational safeguards | Make mandatory gates visible in the executive decision<br>**Contingency / owner:** Phase scope or move date; TPM with Security/SRE. |
 
 This is a consolidated delivery risk view, not a staffed or scored register. Probability, quantified impact, named owner, trigger date and residual risk remain to be assigned; “monitor closely” is not a mitigation. Capacity headroom, compliance constraints and unresolved write outcomes remain risks even after traffic routing recovers.
 
 ## TPM Constraint Mutations
 
-| Changed constraint | Accepted response | Guardrail / correction |
-|---|---|---|
-| Nine-month plan becomes five months | Parallelize platform/security/onboarding/observability foundations; start E2E and performance on stable slices; phase regions or APIs | Do not compress InfoSec, TLS/cert readiness, failover, critical performance, rollback or minimum SRE gates. Only noncritical dashboards/automation can move later. |
-| Europe slips eight weeks; Canada/US ready | Launch Canada/US first once their own gates pass | Europe must be independently addable; isolate shared config changes and prevent unapproved European routing. Confirm no all-region commitment blocks phasing. |
-| At 5% canary, p99 rises 35% while errors remain normal | Pause expansion and investigate while holding the bounded canary | Compare gateway/LB/auth/network/dependency traces and saturation. Roll back if SLO/impact worsens or diagnosis exceeds the agreed safe window. |
-| Partner APIs added two weeks before Release 1 | Protect launch and phase partner APIs, or explicitly move the date to include them fully | Assess mTLS/onboarding, quotas, external connectivity, threat model, contracts, certification and capacity; a controlled pilot requires its own bounded scope. Never silently absorb risk. |
+| Changed constraint | Response and guardrail |
+|---|---|
+| Nine-month plan becomes five months | Parallelize platform/security/onboarding/observability foundations; start E2E and performance on stable slices; phase regions or APIs<br>**Guardrail:** Do not compress InfoSec, TLS/cert readiness, failover, critical performance, rollback or minimum SRE gates. Only noncritical dashboards/automation can move later. |
+| Europe slips eight weeks; Canada/US ready | Launch Canada/US first once their own gates pass<br>**Guardrail:** Europe must be independently addable; isolate shared config changes and prevent unapproved European routing. Confirm no all-region commitment blocks phasing. |
+| At 5% canary, p99 rises 35% while errors remain normal | Pause expansion and investigate while holding the bounded canary<br>**Guardrail:** Compare gateway/LB/auth/network/dependency traces and saturation. Roll back if SLO/impact worsens or diagnosis exceeds the agreed safe window. |
+| Partner APIs added two weeks before Release 1 | Protect launch and phase partner APIs, or explicitly move the date to include them fully<br>**Guardrail:** Assess mTLS/onboarding, quotas, external connectivity, threat model, contracts, certification and capacity; a controlled pilot requires its own bounded scope. Never silently absorb risk. |
 
-**Delivery synthesis for that open case:** decide whether to change the global-entry solution or move/phase launch. Compare waiting, an already-supported version, a validated alternative, or a bounded phased launch against capability, migration effort, recovery targets and mandatory gates. Recommend preserving those gates and the simplest validated option; if none can meet them, rebaseline the date. Set the decision deadline before the latest safe integration/test start, using the actual critical path. Do not invent a calendar date or present an untested workaround as ready.
-
-Separate security-blocker and simultaneous-global-launch mutations from the opening brief were not completed. Recovery principles established by the completed scenarios are re-sequencing, parallel delivery, phased regions/APIs, explicit scope/date decisions and preservation of mandatory gates.
+The recovery principles retained across these scenarios are re-sequencing, parallel delivery, phased regions/APIs, explicit scope or date decisions, and preservation of mandatory gates.
 
 ## Production Readiness
 
@@ -371,13 +377,13 @@ Use **observe/shadow → small canary → limited traffic/region → progressive
 
 The baseline phased order is **Canada → US → Europe**; if Europe is delayed, ready Canada/US can proceed under the independence and approval constraints above. Avoid simultaneous global policy changes that unnecessarily combine blast radius. Partner APIs may follow after their additional gates pass.
 
-| Trigger | Action | Recovery check |
-|---|---|---|
-| Invalid route/auth config or failed validation | Block deployment | Correct and revalidate a new version. |
-| Bounded canary latency regression | Freeze expansion; inspect baseline versus canary | Resume only after cause and safe capacity are established. |
-| SLO breach, worsening customer outcomes or unsafe saturation | Reduce exposure or restore known-good within the agreed rollback window | Confirm routing, auth and end-to-end operation success, not only gateway health. |
-| Residency/security violation or unsafe write behavior | Stop affected exposure and invoke the relevant incident controls | Re-establish policy/correctness and reconcile uncertain operations before resuming. |
-| Recovered region ready for return | Gradually increase new-traffic weight with hysteresis | Let accepted work finish in its current region and watch sustained stability. |
+| Trigger | Action and recovery check |
+|---|---|
+| Invalid route/auth config or failed validation | Block deployment<br>**Recovery check:** Correct and revalidate a new version. |
+| Bounded canary latency regression | Freeze expansion; inspect baseline versus canary<br>**Recovery check:** Resume only after cause and safe capacity are established. |
+| SLO breach, worsening customer outcomes or unsafe saturation | Reduce exposure or restore known-good within the agreed rollback window<br>**Recovery check:** Confirm routing, auth and end-to-end operation success, not only gateway health. |
+| Residency/security violation or unsafe write behavior | Stop affected exposure and invoke the relevant incident controls<br>**Recovery check:** Re-establish policy/correctness and reconcile uncertain operations before resuming. |
+| Recovered region ready for return | Gradually increase new-traffic weight with hysteresis<br>**Recovery check:** Let accepted work finish in its current region and watch sustained stability. |
 
 **Production clarification.** Code/config rollback and traffic failback are different operations. Restoring a gateway version does not undo a committed payment. Traffic can return only to an eligible, healthy destination with capacity; write-state reconciliation and authority cannot be bypassed by changing a weight. Exact automated versus operator-controlled triggers remain implementation decisions.
 
@@ -416,4 +422,4 @@ The baseline phased order is **Canada → US → Europe**; if Europe is delayed,
 
 ---
 
-**Chapter provenance:** Completed Topic 4 API Gateway + Global Load Balancing drill, including accepted/rejected choices, corrections, architecture mutations, adversarial review, AI intersection, TPM delivery and final E2E review. The opening brief supplies readiness requirements; unanswered scenarios, delivery synthesis, production clarifications and unresolved contracts are labeled explicitly. Previous: [Topic 3 — Rate Limiter](../03-rate-limiter/README.md).
+**Chapter provenance:** Completed Topic 4 API Gateway + Global Load Balancing drill, including accepted/rejected choices, architecture mutations, adversarial review, AI intersection, TPM delivery, and final E2E review. Production clarifications and unresolved implementation contracts are labeled explicitly. Previous: [Topic 3 — Rate Limiter](../03-rate-limiter/README.md).
