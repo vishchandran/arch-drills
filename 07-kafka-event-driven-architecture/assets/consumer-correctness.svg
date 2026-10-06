@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="663" viewBox="0 0 420 663" role="img" aria-labelledby="title desc">
+<title id="title">Consumer correctness boundary</title><desc id="desc">A consumer reads and validates an event. It commits business work and a unique processed-event marker in one local database transaction, skips the effect if the marker already exists, then commits the next Kafka offset. A crash before offset commit causes safe redelivery. Failed work must be processed or durably handed off before advancing progress.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
+<rect width="420" height="663" rx="12" fill="#fff"/>
+<text class="t" x="210" y="31" font-size="18" font-weight="700">Consumer correctness boundary</text>
+<rect class="b" x="38" y="54" width="344" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="81" font-size="16" font-weight="700">Consumer reads E789</text>
+<text class="t" x="210.0" y="103" font-size="13">Example: partition 2, offset 102</text>
+<path class="l" d="M210 118v25"/>
+<rect class="b" x="38" y="150" width="344" height="64" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="177" font-size="16" font-weight="700">Validate schema + state</text>
+<text class="t" x="210.0" y="199" font-size="13">Preserve per-key processing order</text>
+<path class="l" d="M210 214v25"/>
+<rect class="b" x="38" y="246" width="344" height="84" rx="9" fill="#f2edfb" stroke="#9982bd"/>
+<text class="t" x="210.0" y="273" font-size="16" font-weight="700">One consumer DB transaction</text>
+<text class="t" x="210.0" y="295" font-size="13">New: business effect + unique marker</text>
+<text class="t" x="210.0" y="315" font-size="13">Seen: skip duplicate business effect</text>
+<path class="l" d="M210 330v25"/>
+<rect class="b" x="38" y="362" width="344" height="64" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="389" font-size="16" font-weight="700">DB commit succeeds</text>
+<text class="t" x="210.0" y="411" font-size="13">Crash now? Redelivery is safe.</text>
+<path class="l" d="M210 426v25"/>
+<rect class="b" x="38" y="458" width="344" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="485" font-size="16" font-weight="700">Commit Kafka offset 103</text>
+<text class="t" x="210.0" y="507" font-size="13">Next record to read, not business state</text>
+
+<rect class="b" x="38" y="554" width="344" height="84" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="581" font-size="16" font-weight="700">Failure before safe completion</text>
+<text class="t" x="210.0" y="603" font-size="13">Retry / pause / durable DLQ handoff</text>
+<text class="t" x="210.0" y="623" font-size="13">Never advance past unresolved work</text>
+</svg>

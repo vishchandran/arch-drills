@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="703" viewBox="0 0 420 703" role="img" aria-labelledby="title desc">
+<title id="title">Committed payment propagation</title><desc id="desc">Payment checks immediate dependencies, then commits payment state and outbox event intent in one database transaction. CDC publishes the committed event with a stable event ID and payment key. The producer selects a partition and writes to its leader; replicas acknowledge under the durability policy. Independent consumer groups process the event.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
+<rect width="420" height="703" rx="12" fill="#fff"/>
+<text class="t" x="210" y="31" font-size="18" font-weight="700">Committed payment propagation</text>
+<rect class="b" x="38" y="54" width="344" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="81" font-size="16" font-weight="700">Payment Service</text>
+<text class="t" x="210.0" y="103" font-size="13">Immediate authorization checks first</text>
+<path class="l" d="M210 118v25"/>
+<rect class="b" x="38" y="150" width="344" height="84" rx="9" fill="#f2edfb" stroke="#9982bd"/>
+<text class="t" x="210.0" y="177" font-size="16" font-weight="700">One authoritative DB commit</text>
+<text class="t" x="210.0" y="199" font-size="13">Payment state + outbox event E789</text>
+<text class="t" x="210.0" y="219" font-size="13">Both commit, or neither commits</text>
+<path class="l" d="M210 234v25"/>
+<rect class="b" x="38" y="266" width="344" height="64" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="293" font-size="16" font-weight="700">CDC / reliable outbox relay</text>
+<text class="t" x="210.0" y="315" font-size="13">Capture committed intent; retry safely</text>
+<path class="l" d="M210 330v25"/>
+<rect class="b" x="38" y="362" width="344" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="389" font-size="16" font-weight="700">Producer selects partition</text>
+<text class="t" x="210.0" y="411" font-size="13">Key: paymentId P123</text>
+<text class="t" x="210.0" y="431" font-size="13">Discover current leader from metadata</text>
+<path class="l" d="M210 446v25"/>
+<rect class="b" x="38" y="478" width="344" height="84" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="505" font-size="16" font-weight="700">Kafka partition leader</text>
+<text class="t" x="210.0" y="527" font-size="13">Append record; assign offset</text>
+<text class="t" x="210.0" y="547" font-size="13">Replicate under acks + ISR policy</text>
+<path class="l" d="M210 562v25"/>
+<rect class="b" x="38" y="594" width="344" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="621" font-size="16" font-weight="700">Independent consumer groups</text>
+<text class="t" x="210.0" y="643" font-size="13">Fraud · Reconciliation</text>
+<text class="t" x="210.0" y="663" font-size="13">Notification · Analytics</text>
+</svg>

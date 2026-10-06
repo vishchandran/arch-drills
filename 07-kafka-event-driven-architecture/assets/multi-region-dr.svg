@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="703" viewBox="0 0 420 703" role="img" aria-labelledby="title desc">
+<title id="title">Active-passive regional recovery</title><desc id="desc">Region A is authoritative and asynchronously replicates to Region B. If A fails, assess RPO, RTO, missing events, databases and consumer checkpoints. Fence old authority, promote B and route clients. Keep B authoritative until A is healthy, synchronized and ready for a controlled failback.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
+<rect width="420" height="703" rx="12" fill="#fff"/>
+<text class="t" x="210" y="31" font-size="18" font-weight="700">Active-passive regional recovery</text>
+<rect class="b" x="38" y="54" width="344" height="64" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="81" font-size="16" font-weight="700">Region A: active</text>
+<text class="t" x="210.0" y="103" font-size="13">Authoritative writes + processing</text>
+<path class="l d" d="M210 118v25"/>
+<rect class="b" x="38" y="150" width="344" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="177" font-size="16" font-weight="700">Region B: passive DR</text>
+<text class="t" x="210.0" y="199" font-size="13">Asynchronous regional replication</text>
+<text class="t" x="210.0" y="219" font-size="13">Monitor lag and RPO exposure</text>
+<path class="l" d="M210 234v25"/>
+<rect class="b" x="38" y="266" width="344" height="84" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="293" font-size="16" font-weight="700">If Region A fails: assess</text>
+<text class="t" x="210.0" y="315" font-size="13">RPO / RTO; missing events</text>
+<text class="t" x="210.0" y="335" font-size="13">DB state + mapped checkpoints</text>
+<path class="l" d="M210 350v25"/>
+<rect class="b" x="38" y="382" width="344" height="84" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="409" font-size="16" font-weight="700">Fence A; promote B</text>
+<text class="t" x="210.0" y="431" font-size="13">Route producers + consumers</text>
+<text class="t" x="210.0" y="451" font-size="13">Validate business recovery</text>
+<path class="l" d="M210 466v25"/>
+<rect class="b" x="38" y="498" width="344" height="64" rx="9" fill="#f2edfb" stroke="#9982bd"/>
+<text class="t" x="210.0" y="525" font-size="16" font-weight="700">Region B stays authoritative</text>
+<text class="t" x="210.0" y="547" font-size="13">Recovered A cannot resume writes</text>
+<path class="l" d="M210 562v25"/>
+<rect class="b" x="38" y="594" width="344" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="210.0" y="621" font-size="16" font-weight="700">Controlled failback</text>
+<text class="t" x="210.0" y="643" font-size="13">Synchronize A with B; reconcile</text>
+<text class="t" x="210.0" y="663" font-size="13">Verify readiness; shift traffic gradually</text>
+</svg>
