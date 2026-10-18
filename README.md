@@ -23,6 +23,7 @@ Follow the numbered folders in curriculum order. A topic is added here after its
 | [5. Service Mesh + Service Discovery](05-service-mesh-service-discovery/README.md) | Complete |
 | [6. Distributed Cache](06-distributed-cache/README.md) | Complete |
 | [7. Kafka + Event-Driven Architecture](07-kafka-event-driven-architecture/README.md) | Complete |
+| [8. Notification System](08-notification-system/README.md) | Complete |
 
 ## Chapter structure
 
