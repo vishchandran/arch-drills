@@ -349,4 +349,4 @@ On regression, pause expansion and stop the faulty writer/consumer, preserve dur
 
 ---
 
-**Design basis:** completed 17-stage Topic 7 Kafka + Event-Driven Architecture drill, including accepted/refined/challenged/rejected proposals, failure analysis, constraint mutations, AI boundary and compact TPM delivery. Implementation safeguards make the decisions explicit without claiming certification. Previous: [Topic 6 — Distributed Cache](../06-distributed-cache/README.md). Next: Topic 8 — Notification System (planned).
+**Design basis:** completed 17-stage Topic 7 Kafka + Event-Driven Architecture drill, including accepted/refined/challenged/rejected proposals, failure analysis, constraint mutations, AI boundary and compact TPM delivery. Implementation safeguards make the decisions explicit without claiming certification. Previous: [Topic 6 — Distributed Cache](../06-distributed-cache/README.md). Next: [Topic 8 — Notification System](../08-notification-system/README.md).
