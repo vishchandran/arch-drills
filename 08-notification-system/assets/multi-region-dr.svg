@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1030" viewBox="0 0 420 1030" role="img" aria-labelledby="title desc">
+<title id="title">Active-passive regional recovery</title><desc id="desc">Two complete parallel regional stacks. Region A is active; grey Region B is ready but cannot send until fenced promotion. Only durable state is continuously replicated. Automated failover targets under one minute; failback is controlled.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
+<rect width="420" height="1030" rx="12" fill="#fff"/>
+<text class="t" x="210.0" y="30" font-size="18" font-weight="700">Active-passive regional recovery</text>
+<rect class="b" x="16" y="54" width="182" height="42" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="107.0" y="79" font-size="15" font-weight="700">Region A — ACTIVE</text>
+<rect class="b" x="16" y="116" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="141" font-size="15" font-weight="700">Payment Service</text>
+<path class="l" d="M107 160v18"/>
+<rect class="b" x="16" y="182" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="207" font-size="15" font-weight="700">Broker / topic</text>
+<path class="l" d="M107 226v18"/>
+<rect class="b" x="16" y="248" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="273" font-size="15" font-weight="700">Notification Platform</text>
+<path class="l" d="M107 292v18"/>
+<rect class="b" x="16" y="314" width="182" height="44" rx="9" fill="#f2edfb" stroke="#9982bd"/>
+<text class="t" x="107.0" y="339" font-size="15" font-weight="700">Dedup / intent state</text>
+<path class="l" d="M107 358v18"/>
+<rect class="b" x="16" y="380" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="405" font-size="15" font-weight="700">Preference / policy</text>
+<path class="l" d="M107 424v18"/>
+<rect class="b" x="16" y="446" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="471" font-size="15" font-weight="700">Template</text>
+<path class="l" d="M107 490v18"/>
+<rect class="b" x="16" y="512" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="537" font-size="15" font-weight="700">Router / quota</text>
+<path class="l" d="M107 556v18"/>
+<rect class="b" x="16" y="578" width="182" height="44" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="107.0" y="603" font-size="15" font-weight="700">Provider access</text>
+<rect class="b" x="222" y="54" width="182" height="42" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="79" font-size="15" font-weight="700">Region B — PASSIVE</text>
+<rect class="b" x="222" y="116" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="141" font-size="15" font-weight="700">Payment Service</text>
+<path class="l" d="M313 160v18"/>
+<rect class="b" x="222" y="182" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="207" font-size="15" font-weight="700">Broker / topic</text>
+<path class="l" d="M313 226v18"/>
+<rect class="b" x="222" y="248" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="273" font-size="15" font-weight="700">Notification Platform</text>
+<path class="l" d="M313 292v18"/>
+<rect class="b" x="222" y="314" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="339" font-size="15" font-weight="700">Dedup / intent state</text>
+<path class="l" d="M313 358v18"/>
+<rect class="b" x="222" y="380" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="405" font-size="15" font-weight="700">Preference / policy</text>
+<path class="l" d="M313 424v18"/>
+<rect class="b" x="222" y="446" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="471" font-size="15" font-weight="700">Template</text>
+<path class="l" d="M313 490v18"/>
+<rect class="b" x="222" y="512" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="537" font-size="15" font-weight="700">Router / quota</text>
+<path class="l" d="M313 556v18"/>
+<rect class="b" x="222" y="578" width="182" height="44" rx="9" fill="#f0f1f3" stroke="#a8adb5"/>
+<text class="t" x="313.0" y="603" font-size="15" font-weight="700">Provider access</text>
+<path class="l d" d="M198 336H222"/>
+<rect class="b" x="38" y="656" width="344" height="78" rx="9" fill="#f2edfb" stroke="#9982bd"/>
+<text class="t" x="210.0" y="681" font-size="15" font-weight="700">Continuous durable-state replication</text>
+<text class="t" x="210.0" y="701" font-size="13" font-weight="400">A → B: intent, dedup, status, audit</text>
+<text class="t" x="210.0" y="721" font-size="13" font-weight="400">Broker/retry state + config readiness</text>
+<rect class="b" x="38" y="754" width="344" height="78" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="779" font-size="15" font-weight="700">Automated failover: A → B</text>
+<text class="t" x="210.0" y="799" font-size="13" font-weight="400">Validate recovery; fence A; promote B</text>
+<text class="t" x="210.0" y="819" font-size="13" font-weight="400">Targets: RPO &lt;1m and RTO &lt;1m</text>
+<path class="l d" d="M210 734v16"/>
+<rect class="b" x="38" y="852" width="344" height="78" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="877" font-size="15" font-weight="700">Controlled failback: B → A</text>
+<text class="t" x="210.0" y="897" font-size="13" font-weight="400">Synchronize, reconcile, verify readiness</text>
+<text class="t" x="210.0" y="917" font-size="13" font-weight="400">Canary / ramp with exclusive ownership</text>
+<path class="l d" d="M210 832v16"/>
+<text class="t" x="210" y="964" font-size="13">Grey: deployed standby; no send authority</text>
+<text class="t" x="210" y="986" font-size="13">Providers are external; validate both regions</text>
+</svg>
