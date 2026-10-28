@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="860" viewBox="0 0 440 860" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Redis stale-balance failure</title>
+<desc id="desc">The authoritative database commits a balance change from two thousand dollars to fifteen hundred dollars. Cache invalidation fails, so Redis still holds two thousand dollars. Serving that value would violate the available-balance requirement, so the baseline removes Redis from the critical read path.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">Why Redis was rejected</text>
+<rect x="20" y="64" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="93" font-size="20" font-weight="700">1  Authoritative update commits</text>
+<text x="36" y="122" font-size="19">Available balance: $2,000 → $1,500</text>
+<text x="36" y="149" font-size="19">Database now owns version 42</text>
+<path d="M220 176 V216" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="226" width="400" height="112" rx="12" fill="#fff6df" stroke="#c79d42"/>
+<text x="36" y="255" font-size="20" font-weight="700">2  Cache invalidation fails</text>
+<text x="36" y="284" font-size="19">Redis still contains $2,000</text>
+<text x="36" y="311" font-size="19">Cached copy remains at version 41</text>
+<path d="M220 338 V378" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="388" width="400" height="112" rx="12" fill="#fdeeee" stroke="#c78585"/>
+<text x="36" y="417" font-size="20" font-weight="700">3  Unsafe customer outcome</text>
+<text x="36" y="446" font-size="19">A cache hit can return stale funds</text>
+<text x="36" y="473" font-size="19">Customer may make another decision</text>
+<path d="M220 500 V540" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="550" width="400" height="140" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
+<text x="36" y="579" font-size="20" font-weight="700">4  Baseline decision</text>
+<text x="36" y="608" font-size="19">Read balance from authoritative path</text>
+<text x="36" y="635" font-size="19">Reintroduce cache only with proven need</text>
+<text x="36" y="662" font-size="19">and a correctness-preserving protocol</text>
+<text x="20" y="752" font-size="17">Checking the DB version on every cache hit can erase</text>
+<text x="20" y="779" font-size="17">the benefit while still adding failure complexity.</text>
+<text x="20" y="820" font-size="17">For money-critical state: uncertain cache → bypass.</text>
+</g></svg>

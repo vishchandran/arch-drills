@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="930" viewBox="0 0 440 930" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="title desc">
+<title id="title">Normal available-balance request</title>
+<desc id="desc">A banking channel sends an authenticated balance request through the gateway to a stateless balance service. The service authorizes account access, reads the authoritative database through bounded dependency controls, and returns the committed balance.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#42647b"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#162b3b">
+<text x="20" y="34" font-size="22" font-weight="700">Normal balance request</text>
+<rect x="20" y="64" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="93" font-size="20" font-weight="700">1  Banking channel</text>
+<text x="36" y="122" font-size="19">Request account's available balance</text>
+<text x="36" y="149" font-size="19">Carry verifiable customer context</text>
+<path d="M220 176 V216" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="226" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="255" font-size="20" font-weight="700">2  Gateway / load balancer</text>
+<text x="36" y="284" font-size="19">Authenticate and apply admission policy</text>
+<text x="36" y="311" font-size="19">Route to a healthy service instance</text>
+<path d="M220 338 V378" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="388" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="417" font-size="20" font-weight="700">3  Balance Service</text>
+<text x="36" y="446" font-size="19">Authorize customer → account access</text>
+<text x="36" y="473" font-size="19">Acquire bounded DB capacity</text>
+<path d="M220 500 V540" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="550" width="400" height="112" rx="12" fill="#eff6fb" stroke="#6b97b3"/>
+<text x="36" y="579" font-size="20" font-weight="700">4  Authoritative database</text>
+<text x="36" y="608" font-size="19">Use the valid strong-read path</text>
+<text x="36" y="635" font-size="19">Return the latest committed balance</text>
+<path d="M220 662 V702" fill="none" stroke="#42647b" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="20" y="712" width="400" height="112" rx="12" fill="#edf8ef" stroke="#7aaa82"/>
+<text x="36" y="741" font-size="20" font-weight="700">5  Customer response</text>
+<text x="36" y="770" font-size="19">Return the committed available balance</text>
+<text x="36" y="797" font-size="19">Do not substitute an uncertain stale value</text>
+<text x="20" y="872" font-size="17">Metrics, logs and traces observe every stage.</text>
+<text x="20" y="900" font-size="17">If correctness is uncertain, return controlled</text>
+<text x="20" y="922" font-size="17">unavailability.</text>
+</g></svg>
