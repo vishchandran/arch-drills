@@ -4,11 +4,13 @@
 
 **Status:** Complete
 
-A public URL-shortening service is the vehicle for learning how read-heavy traffic, identifier generation, caching, replication, retries, and failure domains constrain one another. The baseline uses stateless URL Service instances, a relational primary with failover replicas, and a distributed cache backed by read replicas. The database generates a numeric ID; the service Base62-encodes it into a short code.
+A bank launches a promotional campaign and shares a short link with customers. The link may receive a few thousand clicks at first, then millions if it spreads through social media. Every click must reach the intended page quickly, and the link must continue working through traffic spikes, cache failures, and database failover.
 
-The design defers distributed ID generation and database sharding until measurement justifies them. Active-passive cross-region recovery is the selected regional-failure extension; active-active writes are not a V1 requirement. Decisions and useful corrections from the drill are retained below, with unresolved production choices called out explicitly.
+The system therefore has two different jobs. **Creation** must produce a unique, durable short URL exactly once for a logical request. **Redirection** must resolve that URL at much higher volume and return an HTTP redirect with very low latency. This split makes the design a useful study of identifier generation, caching, replication, retries, hot keys, and failure domains.
 
-The architecture is organized by responsibility: the creation path establishes durable mappings, the redirect path serves mostly immutable mappings at high volume, the database tier owns truth and failover, and asynchronous analytics stays outside the customer request path. Exact vendors, SLOs, cache policies, node counts, and regional recovery objectives remain implementation decisions.
+The baseline uses stateless URL Service instances, one logical relational database writer with high-availability replicas, a distributed cache, and read replicas for cache misses. The database generates a numeric ID; the service encodes it with Base62 to form the public short code. Distributed ID generation and database sharding remain deferred until measurements justify their complexity. Active-passive cross-region recovery is a failure extension rather than a V1 multi-writer design.
+
+The chapter follows the mapping through its lifecycle: create it durably, serve it efficiently, protect the data tier when copies fail, and extend the topology only when the workload demands it. Decisions, useful corrections, and unresolved production choices are retained. Exact vendors, SLOs, cache policies, node counts, and regional recovery objectives remain implementation decisions.
 
 ## Contents
 
@@ -35,7 +37,9 @@ The architecture is organized by responsibility: the creation path establishes d
 
 ## Problem & Requirements
 
-Accept a long URL, persist its mapping to a compact identifier, and issue an HTTP redirect when someone visits the short URL. Returning a string alone does not complete the product: the browser must be able to follow the stored destination later.
+For the campaign example, the creation API accepts a destination such as `https://bank.example/offers/summer`, persists a durable mapping, and returns a compact address such as `https://go.bank/Wir`. Later, when a customer opens the short address, the service resolves the mapping and returns an HTTP redirect. The browser—not the URL Service—then requests the destination page.
+
+This apparently small feature creates an asymmetric workload. Creating a link is a write that needs uniqueness, durability, and retry safety. Following a link is a read that happens roughly 100 times more often in the exercise, so latency, availability, caching, and traffic concentration dominate the architecture.
 
 | Requirement | Decision and consequence |
 |---|---|
@@ -52,6 +56,8 @@ Accept a long URL, persist its mapping to a compact identifier, and issue an HTT
 
 **Capacity correction.** Five billion redirects/day is a valid *equivalent daily volume* for the assumed peak rate if sustained all day. It is not the forecast daily volume. Burst duration, timing, bots, and concentration on one link still require measurement.
 
+These requirements lead directly to the baseline: keep the service fleet replaceable, let the database own durable mappings and identifiers, and add cache/read capacity specifically for the much larger redirect workload.
+
 ## Final Architecture
 
 The diagrams separate the baseline topology, request flows, and failure behavior so each view remains readable on GitHub web and mobile.
@@ -62,7 +68,7 @@ The diagrams separate the baseline topology, request flows, and failure behavior
 
 [Open the scalable architecture diagram](assets/url-architecture.svg)
 
-Creation and redirect are separate paths through the same service capability. Replication runs from the primary to replicas; creation never writes to a read replica. Cache misses are application-managed lookups, not requests forwarded by Redis. Replicas may have both read and failover roles when the database policy permits.
+The gateway distributes traffic across replaceable URL Service instances. Creation writes to the authoritative primary; replication copies the committed mapping to database replicas. Redirection first checks the distributed cache and uses a read replica on a miss. Redis does not forward the request to the database—the URL Service observes the miss and performs that lookup. A database replica may serve reads, support failover, or do both when the database policy permits it.
 
 ### Creation path
 
@@ -70,7 +76,7 @@ Creation and redirect are separate paths through the same service capability. Re
 
 [Open the scalable creation-flow diagram](assets/create-flow.svg)
 
-Creation establishes a durable mapping before returning it. Cache warming reduces the fresh-link lag window but does not turn cache into the system of record.
+Creation establishes a durable mapping before exposing the short URL. Only after the required database acknowledgement does the service encode the ID and attempt **cache warming**: proactively placing the new ID-to-URL mapping in cache. Warming helps an immediate click while read replicas catch up, but the cache remains a disposable copy rather than durable truth.
 
 ### Redirect path
 
@@ -78,7 +84,7 @@ Creation establishes a durable mapping before returning it. Cache warming reduce
 
 [Open the scalable redirect-flow diagram](assets/redirect-flow.svg)
 
-Redirects decode the public code, use the cache first, and query a read replica on a miss. The normal miss path ends at the read tier; narrowly bounded primary reads are reserved for suspected fresh-link lag under an explicit policy.
+Redirects reverse the public encoding, use the cache first, and query a read replica on a miss. This is **cache-aside**: the application owns the lookup sequence and fills the cache after reading durable storage. The normal miss path ends at the read tier; narrowly bounded primary reads are reserved for suspected fresh-link lag under an explicit policy.
 
 ### Failure behavior
 
@@ -86,7 +92,7 @@ Redirects decode the public code, use the cache first, and query a read replica 
 
 [Open the scalable failure-flow diagram](assets/failure-flow.svg)
 
-Existing redirects and new creation have different failure envelopes. Established mappings can often continue from cache and replicas; creation pauses whenever the system cannot establish one authoritative writer.
+Existing redirects and new creation have different failure envelopes. Established mappings can often continue from cache and replicas. Creation pauses whenever the database cannot establish one authoritative writer, because two writers allocating IDs independently could create conflicting mappings.
 
 ### Baseline and extensions
 
@@ -102,7 +108,33 @@ The baseline is one logical writer with HA replicas, multiple stateless service 
 6. **Resolve a miss safely.** A cache hit returns the destination. A miss triggers an indexed read from a healthy replica and a cache fill on success. A missing row on a lagging replica is not proof that the link never existed.
 7. **Issue the redirect.** The service returns an HTTP redirect with the destination in `Location`; the **browser** requests the destination. The URL Service does not launch the destination itself.
 
-**HTTP choice.** The drill accepted **301** for a lean V1 without hard analytics or destination-change requirements: client/intermediary caching can reduce repeated service traffic. **302** is the preferred alternative when the destination may change or service-side click visibility matters, at higher load. Explicit cache policy still matters: 302 alone does not guarantee every click reaches the service, and cached 301s make later changes or takedowns harder to enforce.
+### Worked creation and retry example
+
+Suppose a client submits `https://bank.example/offers/summer` with idempotency key `campaign-2026-001`.
+
+1. The service validates the URL and begins one transaction.
+2. The database inserts the long URL and allocates numeric ID `125789`.
+3. With the fixed alphabet `0-9A-Za-z`, Base62 represents `125789` as `Wir`; Base62 changes representation but does not create uniqueness.
+4. The database satisfies the required durability acknowledgement, and the service records `campaign-2026-001 → 125789` in the same durable operation boundary.
+5. The service warms cache entry `125789 → https://bank.example/offers/summer` and returns `https://go.bank/Wir`.
+
+If the response is lost, the client may retry with the same idempotency key. **Idempotency** means repeating the same logical operation returns the original result instead of inserting another row. A separate intentional request without that key may still create a different short URL for the same destination; that is the selected product behavior, not a failure.
+
+### Worked redirect example
+
+A browser requests `https://go.bank/Wir`. The URL Service decodes `Wir` to `125789` and checks cache with that numeric key.
+
+- **Cache hit:** Redis returns the long URL; the service immediately returns an HTTP redirect.
+- **Cache miss:** The service performs an indexed lookup for `125789` on a healthy read replica, fills the cache, and returns the redirect.
+- **Fresh-link miss:** If the replica has not applied the recent insert, the explicit freshness policy may allow a narrowly bounded authoritative read. It must not turn every miss into unlimited primary traffic.
+
+In every successful case the response contains a `Location` header. The browser follows that header and makes a second request to the bank's campaign site.
+
+### 301 versus 302
+
+The drill accepted **301 (permanent redirect)** for a lean V1 without a hard requirement for mutable destinations or complete click analytics. A browser or intermediary may cache the result, so a customer who clicks `go.bank/Wir` again may reach the campaign page without calling the shortener. That lowers load, but it also reduces service-side click visibility and makes later destination changes or takedowns harder to enforce.
+
+Use **302 (temporary redirect)** when the destination may change or the product needs more requests to pass through the service for analytics. That flexibility costs additional redirect traffic. Explicit HTTP cache headers still matter: 302 does not guarantee that every client calls the service again, while an aggressively cached 301 can outlive a server-side mapping change.
 
 ## Component Responsibilities
 
@@ -136,11 +168,23 @@ The baseline is one logical writer with HA replicas, multiple stateless service 
 
 ## Data & Consistency
 
-**Minimum model.** Persist numeric ID and long URL. Creation time, owner, expiry, status, and policy metadata are later options. With a stable Base62 alphabet the short code and full short URL are derivable, so neither needs its own stored field. The primary-key **value** identifies a row; the primary-key **index** is the searchable structure used to locate it efficiently instead of scanning all rows.
+The creation flow establishes durable truth; the redirect flow consumes copies of that truth. Keeping those roles separate makes the consistency rules easier to reason about.
 
-**Encoding correction.** Base62 uses 62 symbols, but their ordering must be defined consistently. With alphabet `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`, **125789 ↔ `Wir`**. The conversation's `125789 ↔ X7d` was an illustrative placeholder, not a verified conversion. Base62 is reversible representation, not encryption or a uniqueness generator. Preserve the alphabet, numeric range, and ID uniqueness across upgrades and failover.
+### Minimum model and Base62
 
-**Freshness versus durability.** These are two different failure windows:
+Persist the numeric ID and long URL. Creation time, owner, expiry, status, and policy metadata are later options. With a stable Base62 alphabet, the short code and full short URL are derivable, so neither needs its own stored field. The primary-key **value** identifies a row; the primary-key **index** is the searchable structure that locates it without scanning the table.
+
+**Base62** represents a number using 62 URL-friendly symbols: digits, uppercase letters, and lowercase letters. It is encoding, not encryption and not a distributed ID generator. With alphabet `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`, the database makes `125789` unique and Base62 converts it to `Wir`. Changing the alphabet or its ordering later would change decoding, so the mapping contract must remain stable across deployments and failover.
+
+**Correction retained from the drill.** The earlier `125789 ↔ X7d` example was illustrative rather than a verified conversion. The corrected pair is **125789 ↔ `Wir`** under the alphabet above.
+
+### Cache-aside, warming and replica lag
+
+**Cache-aside** means the URL Service checks cache, reads durable storage on a miss, and then populates cache. It avoids filling memory with every link before anyone uses it. **Cache warming** is the deliberate exception for a newly created link: after durable commit, the service proactively adds that one mapping so an immediate click can succeed quickly.
+
+The reason is **replica lag**—the delay between a commit on the primary and its application on a read replica. If a customer clicks the new link during that delay, the replica may report “not found” even though creation succeeded. Warming narrows this visibility gap. It does not eliminate it: the cache write can fail, the entry can be evicted, or another region can have a cold cache. Redis therefore remains non-authoritative.
+
+Freshness and durability expose different failure windows:
 
 | Failure window | Response and limit |
 |---|---|
@@ -148,15 +192,21 @@ The baseline is one logical writer with HA replicas, multiple stateless service 
 | Primary acknowledges; crashes before any replica receives the row | Require primary + at least one eligible durable replica acknowledgement before success.<br>**Limit:** Promotion rules must preserve committed history; an arbitrary lagging replica is not safe. |
 | Cache contains a row lost during unsafe failover | Never treat cache presence as durable ownership.<br>**Limit:** Cache can conceal data loss until expiry; recreating a different link does not repair the issued link. |
 
-The drill considered temporary primary reads and bounded primary fallback on replica miss as alternatives to warming. **Production policy remains open:** if immediate resolution is promised, provide a bounded authoritative check or a reader known to have applied the write when warming fails. During unresolved lag or dependency failure, return a controlled temporary failure rather than presenting uncertainty as permanent absence. Do not send unlimited misses to the primary or repeatedly create links after a cache error.
+The drill considered temporary primary reads and bounded primary fallback on replica miss as alternatives to warming. **Production policy remains open:** if immediate resolution is promised, provide a capacity-limited authoritative check or a reader known to have applied the write when warming fails. During unresolved lag or dependency failure, return controlled temporary failure rather than presenting uncertainty as permanent absence. Do not send unlimited misses to the primary or create another link merely because cache lookup failed.
 
-**Retry semantics.** Two intentional submissions of the same long URL may create two links. Repeating one operation with the same idempotency key should return its original link. Persist **operation key → numeric URL ID** in shared durable storage, transactionally with creation, and enforce uniqueness against concurrent service instances. The redirect cache is keyed by URL ID, which a client with a lost creation response does not yet know.
+### Idempotency and unknown outcomes
+
+Two intentional submissions of the same long URL may create two links. Repeating one operation with the same idempotency key should return its original link. Persist **operation key → numeric URL ID** in shared durable storage, transactionally with creation, and enforce uniqueness against concurrent service instances. The redirect cache cannot provide creation idempotency: it is keyed by URL ID, which a client with a lost creation response does not yet know.
 
 A timeout means unknown outcome. If the first operation committed but its response was lost, its link remains valid; without idempotency the retry creates another valid link, not a replacement for a broken one. Request-key scope, payload mismatch handling, and retention are implementation contracts still to define. They must keep unrelated requests from reusing an operation result.
 
-**Safe authority.** The DB/HA system owns promotion, not custom URL-service voting. Some deployments use consensus; “all relational replicas vote” is not universal. Fence the old writer, choose a sufficiently current replacement, preserve allocator state, and resume only under the required commit policy. Local replica acknowledgement does not by itself promise zero data loss after an entire region fails.
+### Safe authority during failover
+
+The DB/HA system owns promotion, not custom URL-service voting. Some deployments use consensus; “all relational replicas vote” is not universal. **Split brain** means two database nodes both accept themselves as the writer for the same mappings. Prevent it by fencing the old writer, choosing a sufficiently current replacement, preserving allocator state, and resuming only under the required commit policy. Local replica acknowledgement does not by itself promise zero data loss after an entire region fails.
 
 ## Scaling
+
+The 100:1 read/write ratio means the first scaling question is usually how many redirects bypass the database. Only after measuring the writer's real limits should the design divide durable ownership.
 
 | Area | Reasoning and trigger |
 |---|---|
@@ -171,7 +221,23 @@ A timeout means unknown outcome. If the first operation committed but its respon
 
 The drill's example of a writer sustaining 25k writes/sec at p99 < 20 ms was hypothetical benchmark evidence, not a measured capacity claim. Likewise, neither a healthy 95% hit ratio nor low average CPU proves spare capacity at every dependency.
 
+### Hot keys: one popular link is not ordinary growth
+
+A **hot key** is one cache key receiving a disproportionate share of requests. Suppose a 100-node cache cluster has ample aggregate capacity, but `Wir → campaign URL` receives 500,000 RPS. Consistent hashing still sends `Wir` to its owning node, so that one node can saturate while 99 peers remain lightly used.
+
+Adding more ordinary shards does not divide traffic for the same key. The targeted response is to replicate that hot mapping across multiple cache nodes, add application-local or edge caching, or otherwise fan out reads. Database sharding divides ownership of many mappings; hot-key replication creates more read-serving copies of one mapping. They solve different problems.
+
+### When database sharding becomes justified
+
+Sharding remains deferred while one logical writer meets measured write latency, log throughput, storage, connection, replication, and recovery requirements with headroom. A large redirect number alone does not justify it because cache and read replicas absorb most redirect traffic.
+
+If the writer or mapping table reaches a demonstrated ownership limit, divide numeric-ID ranges among shards. After decoding `Wir → 125789`, a routing layer uses the ID or a shard map to find the one shard that owns that row. Each mapping still has one authoritative owner. Multiple shard-local auto-increment sequences would collide unless the ID strategy changes or allocates non-overlapping ranges.
+
+Simple routing such as `ID % N` remaps many records when `N` changes. **Consistent hashing** places keys and shards on a logical ring so adding or removing a shard moves only affected ranges. It reduces remapping; it does not remove migration work, guarantee perfect balance, or solve a single hot key.
+
 ## Reliability & Failure Modes
+
+Caching improves the normal read path but creates a failure-amplification risk. The fallback must be designed before cache loss occurs.
 
 | Failure | Containment and recovery |
 |---|---|
@@ -185,9 +251,21 @@ The drill's example of a writer sustaining 25k writes/sec at p99 < 20 ms was hyp
 | Response lost after create | Return the committed result for the same operation key.<br>**Protection:** Durable idempotency prevents duplicate creation across retries and restarts. |
 | Edge / load balancer lacks redundancy | Both paths can fail despite healthy services.<br>**Protection:** Inspect every shared dependency, including cache, read capacity, database authority, and regional placement. |
 
-**Regional extension.** Region A normally owns creation; Region B holds warm replicated state and may serve reads if provisioned for it. On failure, establish one authoritative writer before resuming creation. Active-active was rejected for this requirement because it complicates ID allocation, conflicts, replication, ordering and reconciliation. Recovery-time and data-loss objectives, promotion eligibility and failback remain production decisions. Replication is not a substitute for tested backups and restoration.
+### Cache outage and stampede example
+
+At the exercise peak of about 58,000 redirects/sec, a 95% hit ratio sends roughly 2,900 reads/sec to replicas. If the entire cache disappears, as many as 58,000 reads/sec can arrive at the read tier—about 20 times the previous load—before retries or reconnection bursts are counted.
+
+The safe fallback is therefore not “send everything to the database.” Admit only the miss volume the replica tier has proven it can serve. Apply short timeouts, bounded concurrency, rate limits, backpressure, and circuit breakers. A **circuit breaker** temporarily stops calls to a dependency that is repeatedly failing or too slow, preserving service resources while limited probes test recovery. Requests beyond the safe budget receive a controlled temporary failure instead of causing a database-wide outage.
+
+### Active-passive regional recovery
+
+**Active-passive** means Region A normally owns creation while Region B keeps warm replicated state and recovery capacity. Region B may serve eligible reads if the design permits, but it does not accept independent creation writes. If Region A fails, establish one authoritative writer in Region B before resuming creation; established redirects can continue from surviving cache and replicated mappings.
+
+Active-active was rejected for this requirement because concurrent writers complicate ID allocation, conflicts, replication, ordering, partition behavior, and reconciliation. Recovery-time and data-loss objectives, promotion eligibility, and failback remain production decisions. Replication is not a substitute for tested backups and restoration.
 
 ## Security
+
+The redirect path is intentionally simple, but the public creation endpoint introduces abuse and privacy risks that caching and database correctness do not address.
 
 Rate limiting was the first accepted abuse control for creation. Combine IP, API-key/account, tenant or device dimensions as appropriate; add quotas, CAPTCHA/challenges, suspicious-domain blocking and URL reputation/malware checks where justified. Accounts and private links are extensions, not mandatory V1 features.
 
@@ -196,6 +274,8 @@ Rate limiting was the first accepted abuse control for creation. Combine IP, API
 **Enumeration trade-off.** Sequential DB IDs remain guessable after Base62 encoding. The drill considered permutation/obfuscation, non-sequential unique IDs and enumeration limits. None turns a public short code into authorization: private destinations need access controls. If destinations become mutable, expired or blocked, revisit cache invalidation and client redirect caching; the stale-but-correct immutable mapping assumption no longer covers those changes.
 
 ## Observability
+
+The architecture depends on several protective layers, so monitoring must show where load moved rather than merely report that overall latency increased.
 
 | Signals | What they distinguish |
 |---|---|
