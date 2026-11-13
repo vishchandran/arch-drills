@@ -24,6 +24,7 @@ Follow the numbered folders in curriculum order. A topic is added here after its
 | [6. Distributed Cache](06-distributed-cache/README.md) | Complete |
 | [7. Kafka + Event-Driven Architecture](07-kafka-event-driven-architecture/README.md) | Complete |
 | [8. Notification System](08-notification-system/README.md) | Complete |
+| [9. Distributed Scheduler](09-distributed-scheduler/README.md) | Complete |
 
 ## Chapter structure
 
