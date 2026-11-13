@@ -4,11 +4,13 @@
 
 **Status:** Complete
 
-A banking platform with 200 heterogeneous services requires dynamic endpoint discovery, internal load balancing, consistent workload security, bounded resilience, controlled traffic management, and service-to-service observability. The accepted design combines **service registry and discovery + locality-aware load balancing + distributed data-plane proxies + a versioned mesh control plane**.
+A bank operates 200 microservices supporting payments, fraud detection, accounts, customer profiles, notifications, and ledger processing. When the Payment Service calls the Fraud Service, it cannot depend on one fixed IP address: Fraud instances restart, scale, move between hosts, and become unhealthy. Payment first needs a reliable way to find eligible Fraud instances and choose one of them.
 
-Applications retain domain logic. Data-plane proxies enforce approved networking policy on live traffic. The control plane distributes desired state outside the synchronous request path, allowing regional data planes to continue with locally available last-known-good configuration during a management outage.
+**Service discovery** solves that location problem. A registry records the available instances, readiness controls which instances may receive traffic, and internal load balancing selects an endpoint. These capabilities can operate without a service mesh.
 
-The mesh is justified by required cross-cutting capabilities, not service count. If standardized workload identity, mTLS, authorization, resilience, and traffic management are no longer required, service discovery and internal load balancing remain the preferred simpler design. Numerical values are architecture exercises; production thresholds, named owners, and sign-offs remain to be assigned.
+The bank also requires consistent workload identity, mutual TLS (mTLS), service authorization, bounded resilience, controlled traffic rollout, and correlated telemetry across Java, Go, Node.js, and Python services. The accepted design therefore adds **distributed data-plane proxies and a versioned mesh control plane** around the discovery and load-balancing foundation. Applications retain business logic; proxies enforce approved networking policy; the control plane distributes desired state outside the synchronous request path.
+
+Mesh adoption is justified by those cross-cutting requirements, not by the number of microservices. If the requirements disappear, discovery and internal load balancing remain the preferred simpler design. Numerical values are architecture exercises; production thresholds, vendors, owners, and sign-offs remain implementation decisions.
 
 ## Contents
 
@@ -39,6 +41,8 @@ The mesh is justified by required cross-cutting capabilities, not service count.
 
 ## Problem & Requirements
 
+The immediate problem is concrete: Payment must call Fraud, and Fraud may call Ledger, while all three services change capacity and placement continuously. Hard-coded addresses fail as soon as an instance is replaced. A registry lookup alone is also insufficient if it returns a process that is alive but not ready, or if every service implements security, retries, and telemetry differently.
+
 | Requirement | Decision and consequence |
 |---|---|
 | Dynamic endpoints | Call logical services; register changing instance endpoints and metadata instead of hard-coding addresses. |
@@ -51,9 +55,17 @@ The mesh is justified by required cross-cutting capabilities, not service count.
 | Regional independence | A healthy region must continue without another region or a remote control plane. |
 | Operability | Distinguish application, proxy, discovery, network, identity, authorization, control-plane, and downstream failures. |
 
-Payment, Fraud, and Ledger illustrate the runtime path. Service instances scale, restart, reschedule, and deploy across availability zones (AZs) and regions. Exact vendors, certificate lifetimes, retry budgets, policy thresholds, SLOs, and regional data contracts remain implementation decisions.
+The architecture therefore develops in three steps:
+
+1. **Discover eligible instances.** Register dynamic endpoints and exclude instances that are not ready.
+2. **Select an endpoint.** Balance requests using health, locality, load, latency, and outlier state.
+3. **Standardize service communication.** Add the mesh only where common identity, security, resilience, routing, and telemetry justify its cost.
+
+Exact vendors, certificate lifetimes, retry budgets, policy thresholds, SLOs, and regional data contracts remain implementation decisions.
 
 ## Final Architecture
+
+The normal Payment-to-Fraud request path appears first. Regional autonomy and failover extend that baseline; they do not replace it.
 
 ### Service-to-service runtime
 
@@ -61,7 +73,7 @@ Payment, Fraud, and Ledger illustrate the runtime path. Service instances scale,
 
 [Open the scalable runtime architecture](assets/runtime-architecture.svg)
 
-The Payment proxy consumes discovery state, selects an eligible Fraud endpoint, establishes mTLS, applies authorization and resilience policy, and emits telemetry. The Fraud proxy authenticates and authorizes the caller before forwarding to the application.
+Payment calls the logical Fraud service rather than an instance address. Its local proxy consumes discovery state, selects an eligible Fraud endpoint, establishes mTLS, applies the approved deadline and routing policy, and emits telemetry. The destination proxy authenticates Payment's workload identity, enforces service-level authorization, and forwards the request to Fraud. Fraud still owns the screening decision and other domain rules.
 
 ### Regional autonomy
 
@@ -69,7 +81,7 @@ The Payment proxy consumes discovery state, selects an eligible Fraud endpoint, 
 
 [Open the scalable regional autonomy diagram](assets/regional-autonomy.svg)
 
-The control plane distributes validated, versioned desired state. Regional data planes enforce that state locally. A control-plane outage freezes management changes but does not immediately stop healthy service-to-service traffic.
+The control plane distributes validated, versioned desired state to regional proxies. Those data-plane proxies enforce the state locally. Because the control plane is not a per-request hop, an outage freezes management changes but does not immediately stop traffic already covered by valid local discovery and last-known-good (LKG) policy.
 
 ### Locality and failover
 
@@ -81,14 +93,15 @@ Normal routing prefers healthy, performant same-AZ capacity, then another AZ in 
 
 ## End-to-End Flow
 
-1. **Register:** Fraud instances publish workload identity, endpoint, locality, version, and readiness metadata.
-2. **Discover:** registry state reaches the Payment data plane without a synchronous lookup for every request.
-3. **Select:** the local proxy chooses a ready endpoint using locality, load, latency, and outlier signals.
-4. **Secure:** Payment presents its workload identity over mTLS; Fraud authenticates it and evaluates least-privilege authorization.
-5. **Protect:** the caller deadline bounds waiting. The designated retry owner applies only safe, bounded retries with backoff, jitter, and a retry budget.
-6. **Serve:** Fraud receives the request after destination-side policy enforcement.
-7. **Observe:** applications and proxies emit correlated metrics, logs, traces, policy outcomes, and certificate signals.
-8. **Manage:** the control plane versions, validates, distributes, and reconciles desired policy outside the request path.
+1. **Register the instance.** A new Fraud instance publishes its endpoint, locality, version, and workload identity. It does not receive production traffic until readiness succeeds.
+2. **Distribute discovery state.** The registry's eligible endpoint set reaches Payment's local data plane. Payment does not synchronously query the registry for every request.
+3. **Select an endpoint.** The local proxy prefers a healthy, performant same-AZ Fraud instance, then another AZ in the region. Outlier and saturation signals can override locality.
+4. **Establish trust.** Payment presents its workload identity over mTLS. Fraud's proxy verifies the identity and the trust chain; Payment also verifies Fraud.
+5. **Authorize the call.** The destination proxy checks whether Payment may invoke the Fraud operation. This service permission does not approve the payment itself.
+6. **Bound the work.** The caller deadline limits total waiting. One designated layer may retry only a safe operation, using bounded attempts, exponential backoff, jitter, and a retry budget.
+7. **Run domain logic.** Fraud evaluates the transaction. If its workflow calls Ledger, the same discovery, identity, authorization, and resilience sequence applies to that hop.
+8. **Observe the result.** Applications and proxies emit correlated metrics, logs, traces, policy outcomes, and certificate signals.
+9. **Manage asynchronously.** The control plane validates, versions, distributes, and reconciles policy outside the live request path.
 
 ## Component Responsibilities
 
@@ -121,19 +134,23 @@ Normal routing prefers healthy, performant same-AZ capacity, then another AZ in 
 
 ## Service Registry & Discovery
 
+Service discovery answers a location question: **which Fraud instances are currently eligible to receive a request?** It does not decide whether Payment is authorized, whether a payment is valid, or how many times an operation may be attempted.
+
 ![Service instance lifecycle](assets/instance-lifecycle.svg)
 
 [Open the scalable instance-lifecycle diagram](assets/instance-lifecycle.svg)
 
-An instance registers before it becomes ready. Once readiness passes, discovery may return it and the balancing layer may select it. Planned shutdown reverses the sequence: mark not ready, stop new traffic, drain in-flight requests, deregister, then terminate.
+An instance registers before it becomes ready. **Liveness** answers whether the process is running; **readiness** answers whether it can safely receive production traffic. Once readiness passes, discovery may return the endpoint and the balancing layer may select it. Planned shutdown reverses the sequence: mark not ready, stop new traffic, drain in-flight requests, deregister, then terminate.
 
 A crashed process cannot deregister itself. External health checks, heartbeats or leases, and TTL expiry must eventually remove it from the eligible set. Passive connection failures can accelerate avoidance while registry state converges.
 
 A slow instance that still returns HTTP 200 may remain registered but lose normal traffic through latency-aware balancing or outlier ejection. Registered, alive, ready, and performant are separate states.
 
-During a registry outage, existing calls continue from recent discovery state. New instances may start but remain unavailable to callers, so new compute does not become usable capacity. Monitor state age, stale endpoints, and reconciliation after recovery.
+During a registry outage, existing calls continue from recent discovery state. A known healthy Fraud instance can therefore keep serving. New instances may start but remain unavailable to callers, so new compute does not become usable capacity. After recovery, consumers reconcile their endpoint sets; operators monitor state age, stale endpoints, and convergence rather than assuming that started capacity is routable capacity.
 
 ## Discovery Models & Internal Load Balancing
+
+Discovery provides the eligible set. Internal load balancing chooses one member of that set for the current request. Keeping those responsibilities separate makes failure analysis clearer: a registry can be correct while endpoint selection is poor, and a good load-balancing algorithm cannot repair stale registry data.
 
 | Model | Use and trade-off |
 |---|---|
@@ -141,11 +158,15 @@ During a registry outage, existing calls continue from recent discovery state. N
 | Server-side discovery | Client calls a stable service abstraction; infrastructure discovers and selects an endpoint. Simplifies clients but adds infrastructure that must scale and remain available. |
 | Mesh proxy selection | Local proxy combines discovery and load balancing with security, resilience, routing, and telemetry. Adds runtime and operational cost. |
 
-Discovery answers **which usable endpoints exist**. Internal load balancing answers **which one receives this request**. Round robin is simple; least requests or concurrency-aware selection better reflects unequal work. Connection count alone may misrepresent load under pooled or multiplexed protocols.
+With client-side discovery, Payment receives Fraud endpoints and chooses one itself. With server-side discovery, Payment calls a stable intermediary that performs discovery and selection. With the selected mesh model, Payment calls through its local proxy, which performs selection consistently across programming languages while also enforcing approved mesh controls.
+
+Round robin is simple; least-requests or concurrency-aware selection better reflects unequal work. Connection count alone may misrepresent load under pooled or multiplexed protocols. A slow endpoint returning HTTP 200 is technically alive but may still be ejected when its latency is abnormal relative to peers.
 
 Locality normally follows **same AZ → same region/different AZ → another region when explicitly approved**. Locality is a preference, not permission to continue routing to a slow or saturated endpoint.
 
 ## Mesh Control & Data Planes
+
+Discovery and load balancing are sufficient when the requirement is only to find and select instances. The mesh is introduced because the bank also needs the same workload security, resilience, traffic, and telemetry behavior across many services and language stacks.
 
 | Capability | Definition and runtime placement |
 |---|---|
@@ -155,11 +176,22 @@ Locality normally follows **same AZ → same region/different AZ → another reg
 | Traffic splitting | Control plane defines versions and weights; data plane routes the actual traffic share. |
 | Telemetry | Control plane configures collection and propagation; data plane generates runtime signals. |
 
-The control plane defines and distributes desired state. The data plane enforces it. During a control-plane outage, current traffic continues with locally available approved policy and discovery state. New changes pause, drift becomes observable, and reconnecting proxies reconcile to the declared approved version.
+The **data plane** is the distributed set of proxies that handles live east-west traffic between services. A sidecar is one deployment pattern in which the proxy runs beside the workload; the architectural requirement is local, distributed enforcement rather than a particular packaging model. The **control plane** validates and distributes desired routing, security, resilience, and telemetry configuration. It does not forward every Payment request.
+
+Consider a chronological outage:
+
+1. Before the outage, the control plane sends versioned policy and trust configuration to the Payment and Fraud proxies.
+2. Each proxy validates and acknowledges the configuration, then enforces it locally on live requests.
+3. The control plane becomes unavailable. Existing Payment → Fraud traffic continues when the proxies still hold valid discovery state, policy, and credentials.
+4. Policy changes and rollout progression stop. Configuration age and drift become operational signals.
+5. New instances may be unable to obtain required discovery, identity, or policy state and therefore must not be treated as usable capacity.
+6. When the control plane recovers, proxies reconcile to the explicitly approved version rather than blindly accepting whichever update appears newest.
 
 Last-known-good state protects availability but has limits. Cached configuration does not extend certificate validity or guarantee that stale authorization remains safe after a critical security change.
 
 ## Reliability & Failure Modes
+
+Reliability controls protect the caller and the dependency, but they do not make an unsafe business operation retryable. Payment owns the operation's deadline and idempotency semantics; the mesh may execute an approved policy only when ownership is explicit.
 
 | Failure | Containment and recovery |
 |---|---|
@@ -176,21 +208,47 @@ Last-known-good state protects availability but has limits. Cached configuration
 
 Circuit state and business failure policy are different. Circuit **OPEN** stops dependency calls. For a high-value payment that requires Fraud approval, business behavior should **fail closed** by rejecting, holding, or routing to manual review rather than interpreting unavailability as approval.
 
+### How the controls work together
+
+- **Timeout/deadline:** limits how long Payment waits across the whole call, including connection setup and any approved retry.
+- **Retry:** makes another attempt only for a safe failure and within the remaining deadline. Exponential backoff spaces attempts; jitter prevents callers from retrying in lockstep.
+- **Retry budget:** caps aggregate extra traffic. It prevents a struggling Fraud service from receiving an unlimited second wave of work.
+- **Circuit breaker:** stops new dependency calls after a sustained failure signal and uses limited half-open probes to test recovery.
+- **Outlier detection:** removes one abnormal Fraud instance while healthy peers continue; it is different from declaring the whole Fraud service unavailable.
+- **Connection and concurrency limits:** bound in-flight work. When queues fill, backpressure or controlled rejection protects Fraud and its dependencies.
+
+Retry multiplication is the key warning. If a gateway, Payment, the Payment proxy, and Fraud each make three attempts, one original request can cause up to **3 × 3 × 3 × 3 = 81** downstream attempts. The accepted design assigns one retry owner. A read-only lookup with an idempotent contract may qualify; a payment mutation without a safe idempotency protocol does not.
+
+### Failure sequence examples
+
+| Event sequence | What continues, degrades, or fails safely |
+|---|---|
+| Fraud instance crashes | Connection attempts fail; passive signals and lease/health expiry remove the stale endpoint. Other ready instances continue if they have capacity. |
+| Readiness fails before shutdown | New traffic stops, in-flight work drains, and the endpoint deregisters before termination. |
+| Registry becomes unavailable | Known endpoints continue from recent state; topology changes and new capacity are delayed until reconciliation. |
+| Local proxy fails | Its workload is isolated or marked unready; other workloads and proxies continue. |
+| Authorization policy wrongly denies Payment | The bounded canary shows denials; rollout freezes and the approved LKG version is restored. Requests fail closed during the unsafe interval. |
+| Retry storm begins | Retry budgets, concurrency limits, and circuit breaking reduce amplification; operators remove duplicate retry owners and protect critical traffic. |
+| AZ fails | Surviving AZ capacity absorbs traffic only within proven headroom; admission control and priority shedding prevent a second collapse. |
+| Region fails | Cross-region routing occurs only under the approved recovery plan with compliant data, identity, downstream health, and safe capacity. |
+
 ## Security
 
 ![Workload identity and authorization flow](assets/workload-security.svg)
 
 [Open the scalable workload-security diagram](assets/workload-security.svg)
 
-- **Workload identity:** establishes which service is calling, independent of its IP address.
-- **mTLS:** encrypts the connection and mutually authenticates both workloads; it does not grant an operation.
-- **Authorization:** determines what the authenticated workload may do.
+- **Workload identity:** establishes which service is calling, independent of its IP address. Payment instances receive their own verifiable identity rather than sharing a broad certificate with unrelated services.
+- **TLS:** encrypts traffic and normally authenticates the server. **mTLS** also authenticates the client, so Payment verifies Fraud and Fraud verifies Payment.
+- **Authorization:** determines what the authenticated workload may do. Fraud may allow Payment to invoke a screening API while denying Notification or an unknown workload.
 - **Least privilege:** grants only required service operations. A valid Notification identity does not permit ledger posting.
 - **Domain authorization:** remains in the application when the decision depends on transaction, account, customer, or business state.
 
+The certificate authority binds each workload identity to a short-lived certificate trusted by the mesh. mTLS proves the connection's workload identities and protects data in transit; it does **not** approve a debit, confirm account ownership, or decide whether a transaction is fraudulent. Those domain decisions remain in Payment, Fraud, and Ledger.
+
 ### Certificate lifecycle
 
-Issue certificates early, install them on a limited cohort, validate mTLS, rotate progressively with old/new overlap, confirm fleet health, and retire the old certificate only after successful adoption. Monitor issuance, installation, expiry margin, rotation failure, trust-bundle version, and workloads still presenting old credentials.
+The lifecycle is **issue → install → validate → rotate with overlap → confirm adoption → retire → revoke when required**. Begin rotation before expiry, install the new certificate on a limited cohort, validate mTLS in both directions, expand progressively, and retire the old certificate only after successful adoption. Monitor issuance, installation, expiry margin, rotation failure, trust-bundle version, and workloads still presenting old credentials.
 
 If an old certificate has already expired, overlap is no longer a recovery mechanism. Remove the workload, repair or reissue its identity, validate it, and return it to service only when secure and ready. Do not weaken mTLS platform-wide to preserve a failing cohort.
 
@@ -200,7 +258,7 @@ If an old certificate has already expired, overlap is no longer a recovery mecha
 
 [Open the scalable configuration-safety diagram](assets/configuration-safety.svg)
 
-Use immutable, explicitly versioned configuration for deterministic rollback, auditability, drift detection, and reconciliation. Validation must cover schema, static references, semantic policy, and critical allowed paths such as Payment → Ledger. Valid syntax alone cannot establish operational safety.
+Use immutable, explicitly versioned configuration for deterministic rollback, auditability, drift detection, and reconciliation. Validation must cover schema, static references, semantic policy, and critical allowed paths such as Payment → Fraud and Fraud → Ledger. Valid syntax alone cannot establish operational safety: a syntactically valid deny rule can still stop every payment.
 
 Deploy first to a bounded service cohort and one region. Observe authorization denials, customer operations, latency, errors, retries, saturation, and dependencies before progressive expansion. Restore the versioned LKG state when a gate fails.
 
@@ -208,12 +266,18 @@ If control-plane failure interrupts a partial rollout, freeze the rollout and le
 
 ## Traffic Management
 
+Traffic management changes **where requests go**. It does not deploy application code by itself, repair a database, or reconcile business state after a regional failure.
+
 | Technique | Use and safety boundary |
 |---|---|
 | Canary | Move a small share progressively, for example 1% → 5% → 20% → 50% → 100%, with predefined gates at each step. |
 | Blue/green | Validate a complete inactive environment, then switch production traffic. Keep the prior environment compatible and available for rapid rollback. |
 | Weighted and version routing | Send an explicit share to a service version; scope by service, cohort, and region and verify capacity. |
 | Traffic shadowing | Copy production requests to a candidate and ignore its response. Suppress side effects and never duplicate a banking write. |
+
+Locality-aware routing normally keeps Payment and Fraud in the same AZ to reduce latency and network cost. If the local Fraud endpoints become slow or saturated, the proxy may choose healthy capacity in another AZ. Cross-region routing is a recovery action with additional compliance, capacity, identity, data, and downstream-readiness checks.
+
+A canary combines weighted routing with observation: expose a small share to Fraud v2, compare it with the baseline, then expand only when customer outcomes and technical signals remain healthy. Blue/green switches between two complete environments and depends on continued contract and data compatibility. Shadowing is diagnostic only; its copied banking requests must not create side effects.
 
 Fraud v2 at p99 280 ms against a 200 ms service SLO fails its rollout gate even if 5xx and business results remain normal. Roll back, diagnose, fix, and canary again.
 
@@ -237,11 +301,15 @@ Dashboards, alerts, and runbooks must enable L1/L2 support to distinguish applic
 
 ## Multi-AZ & Multi-Region
 
+Availability depends on capacity **after** a failure. Routing policy cannot create the missing compute, connections, or downstream capacity.
+
 Prefer same-AZ endpoints while they are healthy and performant. When local latency or saturation degrades, route to another AZ in the same region before considering cross-region traffic. Test cross-AZ connectivity with synthetic probes and controlled failure exercises rather than forcing every normal request across zones.
 
 Two AZs each operating at 60% cannot absorb all traffic after one AZ fails; the survivor would require approximately 120% of its capacity. Design N+1 headroom before failure, apply concurrency/admission controls, and shed or degrade lower-priority work to protect critical transaction traffic.
 
 Normal Canadian transactions use Canadian Payment, Fraud, and Ledger capacity. A synchronous US Fraud dependency adds cross-region latency, cost, data-residency concerns, and failure propagation. Cross-region routing requires an explicit decision supported by compliance, safe capacity, identity/certificates, data readiness, and downstream health.
+
+During a regional outage, global traffic management may direct new requests to an approved survivor, but the mesh only handles service-to-service routing within the permitted recovery design. Application deployment rollback, traffic failover, and database recovery are separate operations with separate owners and evidence.
 
 ## Constraint Mutations
 
@@ -285,6 +353,8 @@ Production recommendations pass deterministic validation, architecture and engin
 
 ## TPM Delivery
 
+The architecture creates a coordinated program, not only a proxy installation. Platform Engineering builds registry and mesh capabilities; application teams classify operations and integrate safely; Infrastructure and Networking provide failure-domain capacity; Identity and Information Security approve trust and authorization; SRE and Observability make the added layer diagnosable; testing teams prove performance and resilience; Release Management controls rollout; and Disaster Recovery validates regional behavior.
+
 | Outcome-based workstream | Completion evidence |
 |---|---|
 | Service Discovery Foundation | Registry lifecycle, readiness, discovery convergence, internal LB, and registry-failure behavior. |
@@ -306,6 +376,8 @@ Production recommendations pass deterministic validation, architecture and engin
 The pilot dependency sequence is **discovery foundation → mesh platform → service identity and mTLS → pilot onboarding → integration/resilience, security approval, and operational readiness → Go/No-Go**.
 
 Security architecture, application assessment, dependency mapping, observability, test design, runbooks, manifests, and lower-environment preparation start before final integration. If the mesh platform slips six weeks, dependent teams continue this preparatory work; final mesh validation, certification, and production onboarding wait for platform readiness.
+
+Operational handover is part of delivery. L1/L2/L3 teams need ownership boundaries, dashboards, runbooks, escalation paths, on-call coverage, and a representative incident simulation before production approval.
 
 ## Program Risks
 
