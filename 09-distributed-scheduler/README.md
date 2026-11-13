@@ -11,12 +11,11 @@ A bank's Distributed Scheduler durably records future and recurring work, detect
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
-- [Drill Coverage](#drill-coverage)
 - [Final Architecture](#final-architecture)
 - [End-to-End Flow](#end-to-end-flow)
 - [Component Responsibilities](#component-responsibilities)
 - [Key Architecture Decisions](#key-architecture-decisions)
-- [Scheduling, Recurrence & Cancellation](#scheduling-recurrence--cancellation)
+- [Classification, Preferences & Routing](#classification-preferences--routing)
 - [Data & Consistency](#data--consistency)
 - [Scaling](#scaling)
 - [Reliability & Failure Modes](#reliability--failure-modes)
@@ -49,24 +48,6 @@ A bank's Distributed Scheduler durably records future and recurring work, detect
 | Operability and auditability | Trace schedule → occurrence → claim → dispatch → financial outcome; prove recovery and reconciliation before launch. |
 
 A cron process answers “what should run on this machine?” A distributed financial scheduler must additionally answer **where durable intent lives, who owns an occurrence, what happens after every crash boundary, and how repeated dispatch avoids repeated money movement**. It coordinates time; it does not absorb Transfer Service or ledger responsibilities.
-
-## Drill Coverage
-
-The completed drill contained **44 questions across 11 stages**. The early question wording is not reproduced; this chapter records the verified technical coverage and accepted decisions as an architecture reference.
-
-| Stage | Questions | Verified coverage captured here |
-|---|---:|---|
-| 1. Foundations | 1–4 | Scheduler responsibilities, cron limits, durable intent and service boundaries. |
-| 2. Core flow | 5–8 | Scheduling API, durable store, due detection, outbox and Kafka dispatch. |
-| 3. Ownership | 9–12 | Atomic claims, leases, fencing tokens and crash recovery. |
-| 4. Financial correctness | 13–16 | Redelivery, Transfer Service idempotency, ledger reconciliation, recurring execution IDs and outcome events. |
-| 5. Recovery | 17–20 | Misfires, backlog recovery, retries, unknown outcomes, DLQ and capacity limits. |
-| 6. Time semantics | 21–24 | Time zones, daylight saving time, cancellation races and clock skew. |
-| 7. Scale | 25–28 | Sharding, hot customers, backpressure and global rate limiting. |
-| 8. Availability | 29–32 | Database durability, observability, operational readiness and No-Go criteria. |
-| 9. Regional DR | 33–36 | Quorum, fencing, per-shard failover/failback, RPO 0 and RTO 5 minutes. |
-| 10. Architecture review | 37–40 | Capacity mutations, financial idempotency, stale tokens and split-brain defense. |
-| 11. AI & delivery | 41–44 | Async AI, Staff TPM milestones/risks/governance, No-Go decision and final defense. |
 
 ## Final Architecture
 
@@ -145,7 +126,18 @@ Blue denotes services and transport, green successful progress, purple durable s
 
 The final Architecture Review Board defense prioritized **financial correctness**, **exclusive distributed ownership with durable recovery**, and **controlled execution under constrained capacity**.
 
-## Scheduling, Recurrence & Cancellation
+## Classification, Preferences & Routing
+
+Scheduling policy classifies work by **timing model, priority, misfire behavior and financial criticality** before dispatch. Routing selects the owning database shard, Kafka partition, worker lane and Transfer Service capacity budget. These decisions are deterministic and versioned; they do not depend on a worker's local clock or an AI prediction.
+
+| Class / example | Scheduling and constrained-capacity behavior |
+|---|---|
+| Critical financial — regulatory or time-bound payment | Reserved dispatch and Transfer Service capacity; immediate recovery within authorization and ledger controls. |
+| Standard financial — scheduled transfer or bill payment | Execute within its lateness SLO; queue durably and reconcile unknown outcomes before retry. |
+| Recurring routine — periodic account sweep | Apply its explicit time-zone, misfire and catch-up policy; do not issue every missed transfer automatically. |
+| Bulk / administrative — reports or maintenance | Throttle or defer first; never consume the capacity reserved for critical payments. |
+
+Priority allocates scarce capacity; it never bypasses authorization, account state, limits or ledger controls. A class label in one shared FIFO is insufficient: the design reserves worker, Kafka, database and Transfer Service capacity for the lanes that must remain available.
 
 ### Time model
 
