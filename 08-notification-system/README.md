@@ -4,22 +4,29 @@
 
 **Status:** Complete
 
-A bank's centralized Notification Platform translates committed business events into push, SMS, email and in-app communications. The accepted design is **Payment Service → broker → Notification Platform → dedup/idempotency → preference/policy → template → router → provider**, with durable status, bounded recovery, isolated priority lanes and active-passive disaster recovery (DR).
+A customer completes a **CAD $500 payment** in mobile banking. The payment is already committed, so the bank must return success without waiting for an SMS carrier, email gateway or push provider. The customer still expects a prompt alert, compliance may require additional communication, and Operations must later explain whether each message was created, accepted, delivered or left uncertain.
 
-**Payment owns business truth; Notification owns customer communication.** Informational alerts are asynchronous and near-real-time. OTP/challenge verification may remain a required synchronous business dependency. Numerical scenarios are exercises, and implementation targets, owners and sign-offs still need evidence.
+Putting every provider integration inside Payment Service would mix payment correctness with phone numbers, device tokens, templates, consent, quiet hours, retries and vendor outages. A slow provider could then delay a completed payment; a retry after an uncertain timeout could send the same alert twice. Both outcomes damage customer trust.
+
+The bank therefore centralizes communication behind a Notification Platform. Payment publishes the committed business fact; the platform determines whether communication is required, applies policy and preferences, renders approved content, selects an eligible channel and records delivery evidence. The accepted design is **Payment Service → broker → Notification Platform → dedup/idempotency → preference/policy → template → router → provider**, with isolated priority lanes, bounded recovery and active-passive disaster recovery (DR).
+
+**Payment owns business truth; Notification owns customer communication.** Informational alerts are asynchronous and near-real-time. An OTP or customer challenge may still be a required dependency of the protected business workflow. Numerical scenarios are exercises, and implementation targets, owners and sign-offs still need evidence.
 
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
+- [Why Centralize Notifications](#why-centralize-notifications)
+- [Events, Channels & Asynchronous Processing](#events-channels--asynchronous-processing)
+- [Classification, Preferences & Routing](#classification-preferences--routing)
 - [Final Architecture](#final-architecture)
 - [End-to-End Flow](#end-to-end-flow)
 - [Component Responsibilities](#component-responsibilities)
 - [Key Architecture Decisions](#key-architecture-decisions)
-- [Classification, Preferences & Routing](#classification-preferences--routing)
 - [Data & Consistency](#data--consistency)
 - [Scaling](#scaling)
 - [Reliability & Failure Modes](#reliability--failure-modes)
 - [Security](#security)
+- [Delivery Status & Audit](#delivery-status--audit)
 - [Observability](#observability)
 - [Constraint Mutations](#constraint-mutations)
 - [Adversarial Architecture Review](#adversarial-architecture-review)
@@ -34,6 +41,8 @@ A bank's centralized Notification Platform translates committed business events 
 
 ## Problem & Requirements
 
+The CAD $500 payment creates several separate obligations. Payment must commit exactly once. A transactional alert should reach the customer quickly. A suspicious-login alert may need a faster deadline and a mandatory channel. A monthly statement can wait until quiet hours end. A promotion requires consent and may expire before delivery. Treating all four as “send a message” hides the business rules that make them different.
+
 | Requirement | Decision and consequence |
 |---|---|
 | Payment, Fraud, Cards, Transfers, Security and Account events | Publish business facts such as `PaymentCompleted`, `PaymentReversed` and `SuspiciousLoginDetected`; centralize communication policy. |
@@ -46,7 +55,57 @@ A bank's centralized Notification Platform translates committed business events 
 
 **Async is a coupling model; near-real-time (NRT) is a latency expectation.** The broker separates producer publication from consumer completion; Payment does not wait for notification delivery. Carry forward Topic 7's transactional outbox/reliable relay so payment commit and event intent cannot diverge. A broker outage retains publication intent; Notification does not become a synchronous payment dependency.
 
+## Why Centralize Notifications
+
+A centralized platform gives every banking domain one governed way to communicate without making it depend on vendor-specific APIs. Payment, Fraud, Cards and Account Services publish facts they own. The platform owns the changing communication concerns: destinations, consent, channel eligibility, templates, vendor quotas, retries, delivery evidence and operational recovery.
+
+This boundary matters during failure. If the push provider is unavailable after the CAD $500 payment commits, Payment still returns success. The notification remains durable, enters bounded recovery and may use an approved fallback. The provider outage affects communication latency, not payment correctness. Centralization also creates one place to prevent duplicate sends, protect critical traffic from marketing volume and preserve an auditable history.
+
+The design does introduce a shared platform whose policy, capacity and operations must be reliable. Teams need governed event contracts, platform ownership and clear onboarding. That cost is justified when it replaces duplicated provider logic and inconsistent customer treatment across many banking services.
+
+## Events, Channels & Asynchronous Processing
+
+The architecture begins with three different objects that must not be confused:
+
+| Object | Meaning in the CAD $500 example |
+|---|---|
+| Business event | `PaymentCompleted` states that the payment already happened. Payment Service is the **producer** of this fact. |
+| Notification intent | `N123` states that an eligible customer communication should be prepared and tracked under policy. |
+| Provider attempt | A request asks a particular push, SMS or email provider to deliver one channel-specific message. |
+
+A **message broker** durably stores and distributes events. A Notification consumer reads them independently of the producer. The broker is the asynchronous boundary: once Payment has safely published the event intent, it does not wait for notification processing to finish. Topic 7's transactional outbox or equivalent reliable relay keeps the payment commit and publication intent together so a crash cannot silently produce “payment committed, event forgotten.”
+
+Asynchronous does not mean slow. It means the producer does not wait for the consumer's result. **Near-real-time** describes the separate latency objective: the platform may consume, classify and hand the alert to a provider within seconds while Payment has already returned success.
+
+| Channel | Typical strength | Important limitation |
+|---|---|---|
+| Push | Fast, rich and inexpensive for a registered device | Device token may be missing, expired or disabled. |
+| SMS | Broad reach and useful for urgent communication | Per-message cost, provider quotas, limited content and incomplete delivery evidence. |
+| Email | Detailed, durable content | Slower customer attention, spam filtering and address/consent constraints. |
+| In-app | Controlled experience inside bank channels | Customer must open or use the application. |
+
+No channel is universally valid. Policy must consider purpose, urgency, consent, customer registration, content, cost, evidence and provider health.
+
+## Classification, Preferences & Routing
+
+Classification turns a generic event into an explicit communication obligation. It determines the lane, deadline, expiry, permitted channels, preference rules, retry budget and audit evidence before the router chooses a provider.
+
+| Class / example | Normal behavior / degraded policy |
+|---|---|
+| Critical/security — `SuspiciousLoginDetected` | Reserved capacity and immediate approved channels; bypass quiet hours/preferences only under explicit security, legal and business policy. |
+| Transactional — `PaymentCompleted`, `PaymentReversed` | Customer preference and NRT SLO; queue during preference failure within allowed latency, then apply approved degraded policy. |
+| Mandatory regulatory communication | Governed content, eligible channels, retention and evidence; “mandatory” does not make every channel legally valid. |
+| Low urgency — `StatementReady` | Schedule after quiet hours in the customer's timezone; low urgency does not imply discardable. |
+| Promotional/bulk — marketing | Consent, strict throttling, deferral and policy-defined expiry; never consume critical reserved capacity. |
+| OTP/customer challenge | Delivery may use asynchronous infrastructure, but the protected action waits for successful verification or expires. Never hold a database transaction open for customer input. |
+
+For the CAD $500 alert, suppose the customer prefers push but has no registered mobile device. The platform first evaluates whether fallback is permitted for this notification type and consent state. It then selects an eligible SMS or email template, locale and destination only if policy allows. It does not assume that every message can use every channel.
+
+Routing combines **type + urgency + preference + policy + destination validity + availability + cost**. For **10 PM–7 AM** quiet hours, a `StatementReady` message at 2 AM is scheduled for the next valid local delivery time; a governed critical-security alert may proceed immediately. Daylight-saving changes and timezone ownership belong in the scheduling policy. Fallback after a sufficiently successful delivery must not silently create another customer message.
+
 ## Final Architecture
+
+The normal path is shown only after the responsibility and policy boundaries are clear. Green begins with committed banking truth, blue carries and delivers work, purple holds durable identity/status, and amber applies policy or recovery controls. Observability is cross-cutting: every stage emits evidence, rather than passing through one final monitoring box.
 
 ### Business event to customer communication
 
@@ -54,17 +113,19 @@ A bank's centralized Notification Platform translates committed business events 
 
 [Open the scalable notification-flow diagram](assets/notification-flow.svg)
 
+The diagram keeps deduplication before policy and rendering so a redelivered `PaymentCompleted` event cannot create a second notification intent. Priority classification happens before shared downstream capacity is consumed. Status and audit span the whole lifecycle because a provider callback can arrive long after the original worker finishes.
+
 ### Recovery and delivery evidence
 
 ![Failure handling around processing and delivery](assets/recovery-status.svg)
 
 [Open the scalable recovery and status diagram](assets/recovery-status.svg)
 
-Retry/DLQ is a failure path around processing and delivery, not a mandatory step immediately after deduplication. Status records the lifecycle; observability spans every component. Blue denotes services/transport, green successful progress, purple durable state, amber policy/recovery, and grey passive components, following Topic 7's palette and narrow SVG convention.
+Retry and the dead-letter queue (DLQ) are failure paths around processing and delivery, not mandatory sequential stages. A DLQ holds work that cannot safely progress after validation or bounded attempts; it requires an owner and a controlled replay procedure. Blue denotes services/transport, green successful progress, purple durable state, amber policy/recovery, and grey passive components, following Topic 7's palette and narrow SVG convention.
 
 ## End-to-End Flow
 
-1. **Commit and publish:** a $12 payment completes as `P123`; durable intent publishes business fact `PaymentCompleted`, `eventId=EVT-789`, through the broker. Payment does not choose `SendSMS` or call a provider.
+1. **Commit and publish:** the CAD $500 payment completes as `P123`; durable intent publishes business fact `PaymentCompleted`, `eventId=EVT-789`, through the broker. Payment does not choose `SendSMS` or call a provider.
 2. **Validate and claim:** Notification validates the contract and atomically records unique event handling plus durable notification intent. Redelivery resumes existing work instead of creating another notification; acknowledge/commit broker progress only after durable handoff.
 3. **Classify and apply policy:** choose critical/transactional/bulk capacity, evaluate preferences, consent, mandatory rules, language, timezone and quiet hours; persist suppression or scheduled deferral where appropriate.
 4. **Prepare:** assign/recover stable `notificationId=N123`; pin an approved template version and validated minimal variables. Select the channel-specific template variant as routing requires.
@@ -73,18 +134,20 @@ Retry/DLQ is a failure path around processing and delivery, not a mandatory step
 7. **Recover:** transient failures enter bounded retry; malformed/exhausted work enters an owned dead-letter queue (DLQ). Repair, canary and throttle replay with identities and completed-send protection intact.
 8. **Survive regional failure:** fence old send authority, validate recovered state/checkpoints and promote standby. Recover uncertain sends using the same identities; synchronize and rehearse controlled failback.
 
+At every step the platform records enough correlation to answer a practical support question: “Payment `P123` completed; what communication did policy require, which content and destination were used, what did the provider report, and what remains uncertain?” It stores evidence without turning notification state into the source of truth for the payment itself.
+
 ## Component Responsibilities
 
 | Component | Responsibility / boundary |
 |---|---|
-| Business service + outbox/relay | Authoritative outcome and reliable business-event publication; no provider logic. |
-| Broker / consumer group | Durable buffering, independent consumption, partitions and progress; not proof of customer receipt. |
-| Notification orchestrator / state store | Event deduplication, durable work, notification identity, scheduling and delivery lifecycle. |
-| Classification / preference / policy | Urgency, consent, permitted overrides, quiet hours, fallback and expiry decisions. |
-| Template store / renderer | Approved immutable versions, localization, validated placeholders and masking. |
-| Router / provider adapters | Channel selection, quotas, breaker, provider idempotency and receipt normalization. |
-| Retry / DLQ / replay operations | Bounded recovery, exception ownership and controlled re-entry. |
-| Audit / observability / SRE | Explain outcomes, detect SLO failures, operate dependencies and regional recovery. |
+| Business service + outbox/relay | Own the authoritative outcome and reliable business-event publication; no provider logic.<br>**Boundary:** payment success never depends on notification delivery. |
+| Broker / consumer group | Buffer events durably and track independent consumer progress.<br>**Boundary:** broker acknowledgement is not proof of customer receipt. |
+| Notification consumer / state store | Validate contracts, deduplicate events, create durable notification intent and schedule work.<br>**Boundary:** notification state describes communication, not payment truth. |
+| Classification / preference / policy | Decide urgency, consent, permitted overrides, quiet hours, fallback and expiry.<br>**Boundary:** router or provider adapters cannot invent policy. |
+| Template store / renderer | Supply approved immutable versions, localization, validated placeholders and masking.<br>**Boundary:** rendering cannot introduce unapproved sensitive data. |
+| Router / provider adapters | Select eligible channels/providers, enforce quotas and normalize acknowledgements/receipts.<br>**Boundary:** provider acceptance remains distinct from delivery. |
+| Retry / DLQ / replay operations | Bound recovery, preserve failed work and govern corrected re-entry.<br>**Boundary:** replay reuses identity and does not mean “send everything again.” |
+| Audit / observability / SRE | Explain outcomes, detect SLO failures and operate dependencies and regional recovery.<br>**Boundary:** telemetry observes every stage; it is not a sequential business hop. |
 
 ## Key Architecture Decisions
 
@@ -104,20 +167,9 @@ Retry/DLQ is a failure path around processing and delivery, not a mandatory step
 
 The final executive defense prioritized **decoupling**, **deduplication/idempotency**, and **priority isolation**: protect payments, avoid repeated customer communications, and preserve urgent service under constrained capacity.
 
-## Classification, Preferences & Routing
-
-| Class / example | Normal behavior / degraded policy |
-|---|---|
-| Critical — `SuspiciousLoginDetected` | Reserved capacity, immediate approved channels; bypass quiet hours/preferences only under explicit security/business policy. |
-| Transactional — `PaymentCompleted`, `PaymentReversed` | Customer preference and NRT SLO; queue during preference failure within allowed latency, then apply approved degraded policy. |
-| Low urgency — `StatementReady` | Schedule after quiet hours in customer timezone; may still be mandatory, so low urgency does not imply discardable. |
-| Bulk — marketing | Consent, strict throttling, deferral and policy-defined expiry; never consume critical reserved capacity. |
-
-Routing combines **type + urgency + preference + policy + destination validity + availability + cost**. With permitted order `Push → SMS → Email`, an invalid push token selects the next eligible channel; low-priority work may wait rather than incur SMS cost. In-app delivery and push availability are distinct capabilities. Providers/channels differ in latency, receipts, content limits and cost.
-
-For **10 PM–7 AM** quiet hours, defer `StatementReady` at 2 AM to the next valid 7 AM local delivery time; account for timezone/daylight-saving changes. A critical alert follows the approved immediate policy. Preference bypass is never an ad-hoc router decision. Policy may intentionally require multiple channels; fallback after a successful sufficient delivery must not silently create extra sends.
-
 ## Data & Consistency
+
+At-least-once delivery means the same event may legitimately arrive more than once after a timeout, consumer restart, replay or regional recovery. The platform therefore promises duplicate-safe processing where it controls state; it does not pretend the transport delivers each record exactly once forever.
 
 ### Identity and durable processing
 
@@ -131,7 +183,17 @@ For **10 PM–7 AM** quiet hours, defer `StatementReady` at 2 AM to the next val
 
 Commit the unique event marker **with durable notification intent**, not separately before work exists. Concurrent check-then-send is unsafe; use uniqueness and atomic claims/ownership. A processed event means its work was safely recorded, not that the customer received it. Workers resume unfinished intent; acknowledge broker progress only after durable success/retry/DLQ handoff.
 
-`P123/EVT-789` and `P124/EVT-790`, both $12 purchases, are legitimate separate notifications. Never deduplicate by customer, amount, merchant or a similarity time window. One event can produce several intended recipient/purpose/channel deliveries: define their identities explicitly while retaining the parent logical notification. Retries reuse the same identity; intentional additional delivery is not a retry.
+`P123/EVT-789` and `P124/EVT-790`, both CAD $500 payments, are legitimate separate notifications. Never deduplicate by customer, amount, merchant or a similarity time window. One event can produce several intended recipient/purpose/channel deliveries: define their identities explicitly while retaining the parent logical notification. Retries reuse the same identity; intentional additional delivery is not a retry.
+
+### Crash and redelivery example
+
+1. The consumer receives `EVT-789`, creates logical notification `N123` and persists the event marker plus notification intent atomically.
+2. The push adapter sends provider request `PR-456` with a stable idempotency key derived from `N123`.
+3. The provider accepts the request, but the worker crashes before recording the final acknowledgement.
+4. The broker redelivers `EVT-789`. The event marker prevents a second notification intent; the worker resumes `N123` rather than creating `N124`.
+5. The platform still does not know whether the external provider accepted the first attempt. It queries provider status where available or retries the **same** stable request key within the provider's documented idempotency window.
+
+This separates two protections. **Consumer idempotency** prevents the same event from creating repeated internal work. **Provider-request idempotency** asks the external system to treat a repeated request as the same attempt. If the provider lacks this capability or its window has expired, the outcome remains uncertain: retry may duplicate the alert, while refusing to retry may lose it. Business urgency, reconciliation evidence and approved policy decide the response.
 
 ### External side effects and delivery semantics
 
@@ -141,6 +203,8 @@ At-most-once risks losing an attempt; at-least-once permits retry/redelivery and
 
 ## Scaling
 
+Priority changes who receives scarce capacity first; it does not create capacity. Separate queues and worker pools stop a two-million-message campaign from sitting ahead of a security alert, while reserved provider budget prevents bulk workers from consuming every downstream request. **Rate limiting** caps the send rate, **backpressure** slows upstream consumption when downstream cannot keep up, and policy-defined **load shedding** discards only work that is explicitly optional or already expired.
+
 - **Separate lanes and capacity:** critical reserved workers/provider budget, protected transactional capacity, throttled bulk/low-urgency work. Classification must occur early enough to avoid a shared ingress bottleneck; reserve state-store and provider resources too.
 - **Partition-aware consumers:** one active consumer per partition per group. Ten partitions and thirty consumers leave twenty without assignments. Diagnose skew/hot customers or event types, database/template latency and provider limits before expanding partitions.
 - **Provider-specific quotas:** aggregate across all workers, retries, replay and regional recovery. A 10K/sec sustainable quota stays at or below 10K unless an explicit burst allowance exists; queue space does not authorize a higher send rate.
@@ -148,18 +212,23 @@ At-most-once risks losing an attempt; at-least-once permits retry/redelivery and
 
 Capacity approval is channel-specific: **20K/sec demand, 30K/sec platform, 12K/sec SMS** is insufficient if all demand is SMS, but potentially sufficient if SMS demand is 8K/sec. Test fallback load, retry amplification, retained backlog/storage and recovery headroom. Backlog drains only when sustainable service rate exceeds new eligible arrivals.
 
+Deadlines matter during overload. A security alert that misses its usefulness window becomes an incident; an expired promotion may be safely discarded under policy; a mandatory statement notice must remain durable even if it is low priority. Retries also consume quota, so unbounded recovery can amplify the original shortage and starve new critical work.
+
 ## Reliability & Failure Modes
 
-| Failure | Containment and recovery |
+Failure handling follows a repeatable question: what failed, what can the customer observe, how is it detected, how is the blast radius contained, how does work recover, and what uncertainty remains?
+
+| Failure sequence | Customer impact, detection and response |
 |---|---|
-| Provider `503` / transient dependency failure | Bounded exponential backoff + jitter, durable retry scheduling and attempt/elapsed-time limits. |
-| Provider `429` / quota pressure | Respect throttling guidance, reduce aggregate rate and defer; more workers do not increase quota. |
-| Malformed payload / invalid template input | Quarantine/DLQ with reason; unchanged data will not heal through retry. |
-| Retry exhaustion | Owned DLQ and escalation; critical unresolved work remains an incident, not silent completion. |
-| Provider widespread outage | Open breaker, preserve backlog and use approved fallback; stop repeated futile calls. |
-| Provider recovery | Half-open probes, validate health, close breaker, then drain only still-required work at a controlled rate. |
-| Receipt absent / acceptance uncertain | Record unknown, reconcile if possible; apply bounded, governed resend/fallback policy. |
-| Retry/DLQ handoff failure | Keep source work recoverable; do not acknowledge away the only durable copy. |
+| Broker unavailable after payment commit | **Impact:** notification publication is delayed; payment remains complete.<br>**Detect:** outbox/relay backlog and oldest-unpublished age rise.<br>**Contain/recover:** retain durable event intent, restore broker access and publish with the same event ID.<br>**Residual risk:** outbox/source-log retention and NRT SLO may be exceeded. |
+| Notification consumer crashes | **Impact:** work pauses and may be redelivered.<br>**Detect:** consumer health, lag and oldest-event age.<br>**Contain/recover:** group reassigns work; durable event marker and intent make redelivery safe.<br>**Residual risk:** an external send may remain uncertain if the crash followed the provider call. |
+| Preference or template service unavailable | **Impact:** channel/content cannot be safely selected.<br>**Detect:** dependency errors and growing deferred work.<br>**Contain/recover:** critical traffic uses only pre-approved degraded policy; transactional/low-urgency work defers; malformed or unavailable template work never falls back to invented content.<br>**Residual risk:** deadlines may expire. |
+| Provider timeout or acknowledgement lost | **Impact:** delivery may have occurred even though local state is unknown.<br>**Detect:** timeout plus missing correlated receipt/status.<br>**Contain/recover:** record `Unknown`, reconcile, and reuse the same provider idempotency key for a bounded retry where supported.<br>**Residual risk:** retry can duplicate; no retry can omit. |
+| Provider `429` / quota exhausted | **Impact:** backlog and delivery latency grow.<br>**Detect:** throttling responses, quota telemetry, queue age.<br>**Contain/recover:** reduce the aggregate provider rate, protect reserved critical budget and defer lower classes.<br>**Residual risk:** more workers cannot raise vendor capacity. |
+| Provider widespread outage / `503` | **Impact:** affected channel stops progressing.<br>**Detect:** provider errors, latency and acceptance-rate drop.<br>**Contain/recover:** open circuit breaker, preserve durable work, apply approved fallback, then half-open probes and controlled drain after recovery.<br>**Residual risk:** cross-provider fallback after an uncertain send can duplicate communication. |
+| Retry storm or lane saturation | **Impact:** new critical work competes with old failures.<br>**Detect:** retry rate, queue age, worker/provider saturation.<br>**Contain/recover:** bounded exponential backoff with jitter, separate retry capacity, admission controls and expiry.<br>**Residual risk:** prioritization cannot solve a sustained capacity deficit. |
+| Malformed input, template defect or retry exhaustion | **Impact:** selected notifications cannot progress.<br>**Detect:** validation errors, DLQ depth and oldest age.<br>**Contain/recover:** quarantine with reason and ownership; repair, select eligible records, canary and ramp replay.<br>**Residual risk:** replay must re-evaluate expiry/consent and preserve identity. |
+| Regional outage or failback error | **Impact:** delayed or duplicate sends if both regions act.<br>**Detect:** regional health, replication lag, authority conflicts and delivery anomalies.<br>**Contain/recover:** fence old authority, promote validated standby, reconcile uncertain sends, and fail back gradually.<br>**Residual risk:** lost recent completion state can trigger another provider attempt. |
 
 **Breaker:** `Closed → Open → cooldown → Half-open → Closed on success / Open on failure`. Retry governs an individual attempt; breaker governs whether to call an unhealthy dependency. Queue priority, retry timing and recovery rate solve different problems.
 
@@ -172,6 +241,10 @@ Capacity approval is channel-specific: **20K/sec demand, 30K/sec platform, 12K/s
 [Open the scalable multi-region DR diagram](assets/multi-region-dr.svg)
 
 The full processing stack is deployed in both regions; grey means standby, not absent. Providers are external dependencies whose reachability and quotas must also be ready in DR. Stateless services need deployment/readiness, not state replication.
+
+Under normal operation, Region A owns event consumption and provider sends. Region B is deployed and ready but fenced from sending. Durable notification intent, deduplication/send status, retry/deferred work, audit evidence and the required broker/checkpoint state replicate continuously. Replicating only the event stream is insufficient: Region B could replay an event without knowing that Region A already completed the external send.
+
+During failover, automation first assesses replication lag and recovered state, then prevents Region A from retaining send authority. Only after that fencing is effective may Region B acquire consumer/provider ownership and resume. Stable notification and provider-request identities allow it to suppress known completions and reconcile uncertain attempts. During failback, Region B remains authoritative until Region A is synchronized, healthy and canaried; both regions must never independently decide to send the same work.
 
 | Control | Required design / evidence |
 |---|---|
@@ -188,6 +261,8 @@ Active-active requires cross-region identity and deterministic ownership/coordin
 
 ## Security
 
+Transport security answers whether data is encrypted and which workload is connected. Application authorization answers whether that workload may publish an event, read contact data or retrieve a provider credential. Communication policy separately answers whether the bank may contact this customer through this channel. All three controls are required; none substitutes for another.
+
 | Area | Control |
 |---|---|
 | Data boundary | Classify and minimize fields; use customer/contact references and masked last four digits where sufficient. Do not copy full account numbers, address or all contact data by default. |
@@ -197,6 +272,20 @@ Active-active requires cross-region identity and deterministic ownership/coordin
 | Credentials | Managed secrets store, workload identity, least-privilege retrieval, rotation and access audit. Payment does not need SMS keys. |
 | Service identity | Authenticate producers/consumers; broker ACLs restrict publish/consume separately; TLS in transit and encryption at rest. Encryption is not authorization. |
 | Provider callbacks | Authenticate/validate receipts, deduplicate updates and prevent stale/out-of-order callbacks from corrupting lifecycle state. |
+
+Regional replication and audit retention extend the privacy boundary. Contact data, rendered content, DLQ payloads and provider receipts must follow approved residency, access and deletion rules in both active and standby regions. Security notifications also require integrity: only authorized producers can cause them, and template/policy changes remain versioned and attributable.
+
+## Delivery Status & Audit
+
+The lifecycle is evidence, not a single Boolean:
+
+`Created → Queued/Deferred → Processing → Provider Request Sent → Provider Accepted → Delivered / Failed / Unknown / Expired`
+
+`Provider Accepted` means the provider took responsibility for an attempt. It does not prove that a handset displayed a push, an SMS reached the customer or a person read an email. `Delivered` is recorded only when the channel/provider supplies credible delivery evidence. `Read/Open` is an additional channel-specific interaction signal where supported, never a universal status.
+
+Provider acknowledgements and authenticated webhooks update the lifecycle using the notification ID, stable provider request ID, provider message ID and attempt number. Callbacks may be duplicated, delayed or arrive out of order, so updates need idempotency and valid state-transition rules. Reconciliation queries or reports close gaps when callbacks are missing; otherwise the platform preserves `Unknown` instead of inventing success.
+
+Audit records connect `eventId`, `notificationId`, classification/policy version, template version, locale, masked destination reference, channel/provider, attempt timestamps, outcomes and error codes. Retention follows business, legal and privacy policy. Operational logs use metadata and redaction rather than copying rendered customer content by default.
 
 ## Observability
 
