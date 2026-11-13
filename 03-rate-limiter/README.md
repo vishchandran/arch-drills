@@ -4,15 +4,16 @@
 
 **Status:** Complete
 
-A banking API is the vehicle for learning fair admission, burst control, atomic counters, distributed quota ownership, and failure trade-offs. The selected design enforces authenticated-user policies at the API Gateway, using **guaranteed local quota + shared burst capacity**. Regional Redis-backed allocators coordinate grants; gateways serve most requests locally with cached policy.
+A bank's Balance API handles **8,000 requests per second normally** and **20,000 RPS at peak**. One corporate customer has hundreds of employees using the same account, while a misconfigured application begins sending thousands of unnecessary requests. The bank must contain the noisy client without unfairly blocking legitimate users or adding material latency to every balance request.
 
-The drill evolved from per-request shared counters to asynchronous quota replenishment. Service-level concurrency and capacity controls remain necessary. Decisions, rejected proposals, and corrections are retained below; numerical scenarios are teaching assumptions, not measured production capacities.
+That creates the central design question: **how can twelve API Gateways enforce one fair customer quota while remaining fast and available?** A counter on each gateway is fast but multiplies the quota. A shared Redis counter is globally coordinated but puts a network dependency on every request. The selected design combines the useful properties of both: gateways enforce **guaranteed local quota**, while regional Redis-backed allocators provide **shared burst capacity** through asynchronous, time-bounded grants.
 
-The architecture is organized by responsibility: the control plane defines and distributes policy, the gateway data plane makes fast local decisions, the regional allocator coordinates shared quota outside the normal request path, and banking services enforce downstream safety. Exact vendors, SLOs, lease durations, regional recovery objectives, and named owners remain implementation decisions.
+The control plane defines and distributes versioned policy. The gateway data plane makes deterministic local decisions. Regional allocators coordinate quota outside the normal request path. Banking services still enforce concurrency and downstream safety because a request can be within customer quota and still overload a dependency. Exact vendors, SLOs, lease durations, regional recovery objectives, and named owners remain implementation decisions rather than claims established by the drill.
 
 ## Contents
 
 - [Problem & Requirements](#problem--requirements)
+- [Rate-Limiting Fundamentals](#rate-limiting-fundamentals)
 - [Final Architecture](#final-architecture)
 - [End-to-End Flow](#end-to-end-flow)
 - [Component Responsibilities](#component-responsibilities)
@@ -49,6 +50,24 @@ Protect `GET /accounts/{id}/balance` against runaway clients, bots, abuse, and u
 
 **Scope boundary.** Exact production quotas, SLOs, lease durations, clock tolerance, emergency budgets, Redis topology, durability policy, and regional recovery targets were not finalized. The later 10-gateway and 100,000 RPS scenarios change assumptions deliberately; they are not baseline forecasts. Authentication and payment correctness remain separate controls.
 
+## Rate-Limiting Fundamentals
+
+Rate limiting controls **how much traffic a subject may send during a period**. A rule such as `120 balance requests per user per minute` protects fairness and abuse boundaries. Throttling is the enforcement response: delay, shape, or reject traffic once a limit is reached. In this design, the gateway normally rejects excess synchronous API traffic with **HTTP 429 Too Many Requests** rather than building an unbounded queue.
+
+Rate limiting is also different from concurrency limiting. A rate limit might allow 1,000 requests per second, but if each request takes ten seconds, the service can accumulate roughly 10,000 in-flight requests. A concurrency limit caps the work active at one moment. The gateway manages customer traffic over time; services use concurrency limits, backpressure, load shedding, and circuit breakers to protect downstream capacity.
+
+### Fairness and capacity are separate controls
+
+A global `Balance API = 20,000 RPS` ceiling protects aggregate capacity but does not create fairness. One customer could consume 18,000 RPS and leave little for everyone else while remaining under the global limit. The design therefore layers limits:
+
+- **Authenticated user or employee** is the primary identity for normal banking traffic.
+- **Tenant or API key** protects contractual entitlement and isolates customers or partners.
+- **Account** supplies a broader safety ceiling, but is not the primary identity when many employees legitimately share one account.
+- **Endpoint** distinguishes operations with different cost and risk, such as balance, login, payment, and OTP.
+- **IP address** is a coarse abuse signal, especially before authentication. It is not a reliable person or machine identity.
+
+A corporate NAT or proxy can make thousands of legitimate users appear under one public IP. A strict per-IP quota would punish the entire office. Likewise, a shared corporate account may have hundreds of authorized employees. The practical rule is to enforce trusted authenticated identity first, then add account, tenant, endpoint, IP, and global ceilings for the risks each dimension can actually represent.
+
 ## Final Architecture
 
 The diagrams separate request enforcement, failure behavior, and AI-governed policy changes so each view remains readable on GitHub web and mobile.
@@ -80,6 +99,20 @@ Failure policy is endpoint-specific. Balance inquiry can tolerate temporary appr
 ### Control and data planes
 
 The **control plane** defines quotas, versions policies, allocates regional budgets, issues or renews grants, and governs rollout. The **data plane** receives policy, consumes locally granted capacity, and makes the per-request allow/reject decision. Redis is a regional coordination mechanism used by the control plane; it is not a request router.
+
+### Why the architecture evolved
+
+The first distributed design was straightforward:
+
+`API Gateway → Redis quota check → Banking Service`
+
+Every gateway would increment the same logical counter, so the fleet could enforce one global user limit. That fixes correctness, but it makes every request wait for Redis. At 20,000 RPS, Redis receives at least 20,000 operations per second, and potentially several times more when user, account, tenant, endpoint, and global rules are checked separately. Redis latency and availability become gateway latency and availability.
+
+The constraint mutation made that coupling unacceptable: **Redis rises from 1 ms to 25 ms p95 while gateway overhead must remain below 5 ms p95**. The request path therefore changed to:
+
+`API Gateway with valid local quota → Banking Service`
+
+The gateway consumes quota locally and replenishes asynchronously before it runs out. Redis still protects the shared budget, but it is now a quota-allocation dependency instead of a synchronous per-request dependency. This preserves fast admission while bounding how much capacity the distributed gateway fleet can spend.
 
 ## End-to-End Flow
 
@@ -125,23 +158,63 @@ Policy distribution and lease issuance/renewal belong to the **control plane** i
 
 | Algorithm | Use and trade-off |
 |---|---|
-| Fixed Window | One counter per subject/rule/window; example 120/min<br>**Trade-off:** Simple and cheap, but 120 at 10:51:59 plus 120 at 10:52:01 admits 240 in about two seconds. |
-| Sliding Window Log | Store individual timestamps and remove entries outside the rolling window<br>**Trade-off:** Accurate but memory and cleanup intensive at 20,000 RPS. |
-| Sliding Window Counter | Combine current count with a weighted previous count<br>**Trade-off:** Compact and smoother at boundaries, but approximate. High traffic alone does not mandate it. |
-| Token Bucket | Capacity **10 tokens**, refill **2 tokens/sec** for the mobile-balance example<br>**Trade-off:** Allows ten immediately when full, then constrains sustained traffic. Capacity is a burst amount, not 130 requests/min. |
-| Leaky Bucket | Drain a bounded queue at a controlled rate; ten arrivals released at 2/sec<br>**Trade-off:** Smooths traffic into a legacy service, but adds queuing and must reject/drop when full. |
+| Fixed Window Counter | Count requests in a named interval, such as 10:51–10:52<br>**Best fit:** Simple, inexpensive policies where boundary bursts are acceptable. |
+| Sliding Window Log | Store each request timestamp and count only entries inside the rolling interval<br>**Best fit:** Precise, lower-volume policies where memory and cleanup cost are acceptable. |
+| Sliding Window Counter | Weight aggregate counts from the current and previous intervals<br>**Best fit:** High-volume policies needing smoother boundaries without per-request timestamp storage. |
+| Token Bucket | Spend accumulated tokens; refill them at a fixed rate<br>**Best fit:** Interactive APIs that should allow controlled short bursts. Selected for the mobile-balance example. |
+| Leaky Bucket | Queue arrivals and release them at a controlled output rate<br>**Best fit:** Downstreams that need smooth traffic and can tolerate bounded queuing. Selected for the legacy-fraud example. |
 
-**Sliding counter arithmetic.** With previous minute = 100 and current minute = 40, halfway through the current minute the estimate is `100 × 0.5 + 40 = 90`; a 120 limit leaves approximately 30 requests. At ten seconds into the minute, previous = 100 and current = 100 yields `100 × 50/60 + 100 ≈ 183`, so reject. Weighting estimates overlapping historical usage; it does not create a per-second allowance. Logs versus counters means individual timestamps versus aggregated totals, not milliseconds versus seconds.
+### Fixed window counter
+
+For a `120 requests/minute` policy, the limiter stores one counter for the current minute. Each request atomically increments it; values up to 120 are admitted and later requests are rejected. A TTL removes the key after the window is no longer needed.
+
+The benefit is simplicity: one small counter per subject and rule. The limitation is the boundary burst. A client can send 120 requests at `10:51:59`, then another 120 at `10:52:01` after the counter resets. Both windows are valid, but 240 requests arrive in about two seconds. Fixed windows remain reasonable when this burst is safe and low operational cost matters more than rolling precision.
+
+### Sliding window log and counter
+
+A **sliding window log** stores every request timestamp. At decision time, it removes timestamps older than 60 seconds and counts the rest. That gives accurate rolling enforcement, but at 20,000 RPS it creates substantial memory, insertion, and cleanup work.
+
+A **sliding window counter** stores aggregate buckets instead. Halfway through a minute, it estimates recent use as `50% of the previous minute + all of the current minute`. With 100 requests in the previous minute and 40 in the current minute, the estimate is `100 × 0.5 + 40 = 90`; a 120 limit leaves about 30 requests. The estimate is compact and avoids the fixed-window cliff, but it is approximate. “Log versus counter” means individual timestamps versus aggregate totals, not milliseconds versus seconds.
+
+### Token bucket
+
+The token bucket separates burst size from sustained rate. For the exercise, a bucket holds **10 tokens** and refills at **2 tokens per second**. If it is full, ten requests can pass immediately. The bucket is then empty; further traffic can proceed only as new tokens arrive or after the client waits for the bucket to refill.
+
+**Bucket capacity controls the permitted burst. Refill rate controls long-term traffic.** Unused capacity can accumulate only up to the bucket maximum, so a quiet client earns a bounded burst rather than unlimited credit. This behavior fits mobile and interactive APIs where brief legitimate bursts are normal.
+
+### Leaky bucket
+
+The leaky bucket protects a downstream that cannot safely absorb bursts. If ten requests arrive together and the drain rate is two per second, the limiter holds them in a bounded queue and releases two each second. New requests are rejected or dropped when the queue is full.
+
+This smooth output is useful for the legacy fraud service, but queueing adds latency and acceptance ambiguity. The queue must be bounded, and synchronous callers need a clear timeout and rejection contract. Token bucket permits a controlled burst; leaky bucket reshapes a burst into a steady output rate.
 
 ## Data & Consistency
 
-**Keys and atomicity.** A key such as `rate:user123:balance:2026-09-13T10:51` identifies whose traffic, which endpoint/rule, and which window; its value is usage. In the fixed-window baseline, atomic INCR returns 120 to one gateway (allow) and 121 to another (reject). This counts attempts, including denied ones; counting only admitted work requires an atomic check-and-consume operation.
+### Why independent gateway counters fail
+
+The user policy is **120 requests per minute across twelve gateways**. If every gateway maintains its own full 120-request counter, the user can send 120 through each instance and receive `12 × 120 = 1,440 requests/minute`. Local counters are individually correct but collectively enforce the wrong policy.
+
+A shared Redis key such as `rate:user123:balance:2026-09-13T10:51` identifies the subject, endpoint, and window. Every gateway updates the same logical state. The key's value records usage; the TTL removes obsolete window state.
+
+### Atomic enforcement
+
+Concurrency alone does not prevent races. Suppose two gateways read `119`, both decide the request fits under a limit of 120, and then both increment. The system admits two requests into one remaining slot. The check and state change must be atomic.
+
+In the fixed-window baseline, Redis `INCR` serializes the updates: Gateway A receives 120 and allows; Gateway B receives 121 and rejects. This version counts attempts, including denied ones. Counting only admitted work requires one atomic check-and-consume operation, often implemented with a server-side script or equivalent transaction.
 
 **Production clarification:** counter creation and expiry must be safe together; separate increment and expiry steps can leave immortal keys after a failure. Window identity determines the reset boundary; TTL cleans up obsolete state. Keep previous buckets long enough for sliding-window overlap. Token refill and consumption also need atomicity wherever concurrent workers share state.
 
-**Guaranteed local quota + shared burst capacity.** For **10,000 requests/min across ten gateways**, allocate **800 locally each = 8,000**, leaving **2,000 shared**. Both are parts of the same budget, not additive entitlements beyond 10,000. A busy gateway can request 500 more. With only 500 left and two gateways asking for 400, the allocator must atomically check, subtract, and grant: one gets 400, leaving at most 100 for the other.
+### Guaranteed local quota and shared burst capacity
 
-**Leases and partitions.** A gateway granted 500 that uses 50 then crashes strands 450 unless ownership can expire. Renewals/heartbeats, short explicit expiries, lease versions/fencing, and conservative partition behavior protect reallocation. A partitioned gateway may still serve traffic after its heartbeat disappears; reassigning its grant while it continues spending doubles the capacity.
+For **10,000 requests/min across ten gateways**, allocate **800 locally to each gateway = 8,000**, leaving **2,000 in a shared pool**. These are two parts of the same 10,000-request budget, not additive entitlements. Normal traffic consumes local quota without a Redis call.
+
+When a busy gateway approaches its low-water mark, it asynchronously requests a chunk from the shared pool. If only 500 tokens remain and two gateways each ask for 400, the allocator must atomically reserve the capacity. One can receive 400, leaving at most 100 for the other. Merely polling “who asked first” cannot prevent both gateways from spending the same capacity.
+
+### Time-bounded grants and partitions
+
+A gateway granted 500 requests may use 50 and then crash. Without expiry, the remaining 450 stay stranded forever. The allocator therefore issues a time-bounded grant, and the gateway renews it while healthy.
+
+A missing heartbeat creates suspicion, not proof of death. During a network partition, the gateway may still be alive and serving customers while the allocator can no longer hear it. If the allocator immediately reassigns the same quota, both gateways can spend it. Short explicit expiry, grant versions or fencing, and conservative reallocation reduce this double-spend risk. The gateway must stop using an expired grant even when it cannot reach the allocator.
 
 **Production clarification:** expiry does not reveal how many tokens were spent. Reclaim only provably unused capacity, or conservatively wait for the accounting window to end. Gateways must stop using expired grants; a fencing number alone cannot stop an isolated local decision unless validity is enforced. Clock safety, grant retry deduplication, restart recovery, and failover accounting must be specified before promising exact enforcement. Cached policy does not extend an expired lease.
 
@@ -151,16 +224,40 @@ Strict, non-overlapping regional allocations can preserve a global cap if accoun
 
 ## Scaling
 
+The main scaling problem is not only total Redis throughput. Distribution can be uneven: some gateways receive much more of one customer's traffic than others, and some customers concentrate a large fraction of all quota checks on one key.
+
 | Pressure | Response and trade-off |
 |---|---|
 | 20,000 RPS with multiple policy dimensions | Per-request shared checks may exceed 20,000 Redis operations/sec. Consume local chunks and measure coordination cost. |
 | One customer causes 40% of checks | Ordinary sharding and consistent hashing retain a single-key hotspot. Use local allocations, bounded subkeys, and hierarchical accounting. |
-| Uneven traffic | Static 1,000/gateway rejects a gateway receiving 3,000 while a gateway receiving 200 leaves 800 idle. Shared overflow helps until depleted; rebalancing is still needed. |
+| Uneven traffic | Static 1,000/gateway rejects a gateway receiving 3,000 while another receiving 200 leaves 800 idle. Shared overflow helps until depleted; rebalancing is still needed. |
 | Chunk size | Larger grants reduce Redis calls but increase stranded capacity and recovery exposure; smaller grants increase coordination. |
 | Fleet growth | Reallocate the existing budget; new gateways must not mint a new full customer quota. |
 | Slow fraud service | Cap in-flight work at the example's 2,000; release slots on completion, failure, or timeout. An RPS limit alone does not bound active work. |
 
+This uneven-allocation problem is **quota fragmentation**. Globally, the customer may still have unused capacity; locally, the busy gateway has none. Shared burst borrowing recovers some stranded quota without returning Redis to every request.
+
+A **hot key** is different. If one customer generates 40% of all checks, ordinary sharding still maps that one key to one Redis shard. Consistent hashing reduces key movement when cluster membership changes; it does not split one hot key. Gateway-local grants and bounded hierarchical sub-allocations spread consumption while the shared allocator coordinates less frequently.
+
 ## Reliability & Failure Modes
+
+Failure policy follows the consequence of admitting too much traffic versus denying legitimate traffic. **Fail open** allows the request when the limiter cannot establish a decision. **Fail closed** rejects it. **Bounded emergency capacity** admits only a small, predefined local allowance while shared enforcement is unavailable. “Critical” does not automatically mean fail closed; the endpoint's abuse, financial, availability, and downstream risks determine the choice.
+
+### Redis or quota allocator outage
+
+The gateway first continues consuming its valid local grant. Replenishment attempts use a short timeout and stay outside the request path. If the allocator recovers before local capacity is exhausted, the gateway installs the new grant and continues normally. If capacity runs out, the endpoint fallback applies: balance inquiry can fail open within downstream safety controls; payment initiation uses bounded emergency capacity if that mechanism was designed, otherwise fails closed; login and OTP fail closed without trustworthy enforcement.
+
+### Control-plane outage
+
+Gateways continue with the last-known-good cached policy, so a ten-minute management outage does not stop normal traffic. They track policy version and age, alert on staleness, and apply stricter maximum-age rules to high-risk policies. Cached policy does not renew or extend quota ownership: an expired grant remains expired.
+
+### Gateway crash, expiry, and network partition
+
+When a gateway crashes, some granted quota may remain unused. The allocator waits for the grant's safe expiry before making capacity available under the recovery contract. During a partition, the absence of heartbeats cannot distinguish a dead gateway from an isolated gateway that is still serving requests. Immediate reassignment can double-spend quota, so ownership transfer must respect expiry, fencing/version rules, and conservative recovery.
+
+### Regional failure and state loss
+
+Regional budgets allow another region to continue independently, but they can strand capacity and create temporary global approximation. Balance inquiry accepts limited over-admission in exchange for availability. OTP needs conservative regional allocation or tighter coordination. If Redis state is lost, OTP must not reset its counter to zero and give an attacker a fresh allowance; use trustworthy recent state, a restrictive fallback, or fail closed.
 
 | Failure / endpoint | Containment and recovery |
 |---|---|
@@ -181,6 +278,8 @@ Known quota exhaustion and inability to establish safe enforcement are different
 Use authenticated user identity as the primary corporate-banking subject, account limits as broader ceilings, and IP as a coarse abuse layer. Combine tenant/API-key and endpoint policies where relevant; avoid treating a shared NAT address as a machine identity or one composite key as a substitute for independent safety ceilings.
 
 Login and OTP quotas are abuse controls, so state loss and cross-region duplication require conservative handling. Guard policy changes with validation, approval for high-risk changes, versioning, canaries, auditability, and local sanity checks. A suspicious drop from 20/min to zero should trigger explicit review/authorization rather than blind global enforcement. Rate limiting does not replace authentication, authorization, or payment idempotency.
+
+These controls solve different problems. Authentication establishes who is calling; authorization decides what that identity may do; rate limiting bounds how often it may try; tenant and global ceilings protect fairness and shared capacity; concurrency limits and load shedding protect saturated services. Observability connects them by showing whether a rise in 429s represents abuse, a bad policy, exhausted shared capacity, or legitimate customer demand.
 
 ## Observability
 
