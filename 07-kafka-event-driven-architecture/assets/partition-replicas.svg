@@ -1,31 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="680" viewBox="0 0 420 680" role="img" aria-labelledby="title desc">
-<title id="title">Partitions, replicas and groups</title><desc id="desc">The producer selects partition 2 using payment ID. Its leader replica is on broker 2, with follower replicas on brokers 1 and 3. Dashed arrows show replication. The same topic is read independently by consumer groups; each partition is assigned to one consumer per group. Partition identity survives leader failover.</desc>
-<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}</style></defs>
-<rect width="420" height="680" rx="12" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="900" viewBox="0 0 420 900" role="img" aria-labelledby="title desc">
+<title id="title">Partitions, replicas and groups</title>
+<desc id="desc">Producer key P123 selects partition 2 and routes to its leader on Broker 2. Dashed arrows show replication to followers on Brokers 1 and 3. A second panel shows the same leader serving independent Notification and Reconciliation groups: consumers fetch up, records return down. Notification has committed next offset 103 while Reconciliation still needs offset 102. Each group has one assigned consumer for partition 2 and its own checkpoint. If the leader fails, an eligible replica takes over without changing partition identity.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.b{stroke-width:1.5}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}.d{stroke-dasharray:6 5}.both{marker-start:url(#arrow)}</style></defs>
+<rect width="420" height="900" rx="12" fill="#fff"/>
 <text class="t" x="210" y="31" font-size="18" font-weight="700">Partitions, replicas and groups</text>
 <rect class="b" x="38" y="54" width="344" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
 <text class="t" x="210.0" y="81" font-size="16" font-weight="700">Producer: key P123</text>
-<text class="t" x="210.0" y="103" font-size="13">Choose partition; discover leader</text>
-<path class="l" d="M210 118v25"/>
+<text class="t" x="210.0" y="103" font-size="13">Select P2; discover its leader</text>
+<path class="l " d="M210 118v25"/>
 <rect class="b" x="38" y="150" width="344" height="64" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
-<text class="t" x="210.0" y="177" font-size="16" font-weight="700">Topic partition 2</text>
-<text class="t" x="210.0" y="199" font-size="13">Leader replica hosted on Broker 2</text>
-<path class="l d" d="M130 214v35H110v28"/>
-<path class="l d" d="M290 214v35H310v28"/>
-<rect class="b" x="18" y="284" width="184" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
-<text class="t" x="110.0" y="311" font-size="16" font-weight="700">Broker 1</text>
-<text class="t" x="110.0" y="333" font-size="13">P2 follower</text>
-<rect class="b" x="218" y="284" width="184" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
-<text class="t" x="310.0" y="311" font-size="16" font-weight="700">Broker 3</text>
-<text class="t" x="310.0" y="333" font-size="13">P2 follower</text>
-<text class="t" x="210" y="377" font-size="13">Dashed arrows = replica copies</text>
-<rect class="b" x="38" y="407" width="344" height="104" rx="9" fill="#fff5df" stroke="#c8a85a"/>
-<text class="t" x="210.0" y="434" font-size="16" font-weight="700">Consumer-group ownership</text>
-<text class="t" x="210.0" y="456" font-size="13">P2 → one Fraud consumer</text>
-<text class="t" x="210.0" y="476" font-size="13">P2 → one Reconciliation consumer</text>
-<text class="t" x="210.0" y="496" font-size="13">Each group tracks its own offsets</text>
-<rect class="b" x="38" y="555" width="344" height="84" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
-<text class="t" x="210.0" y="582" font-size="16" font-weight="700">Leader failure</text>
-<text class="t" x="210.0" y="604" font-size="13">Eligible replica takes over</text>
-<text class="t" x="210.0" y="624" font-size="13">Partition identity stays P2</text>
+<text class="t" x="210.0" y="177" font-size="16" font-weight="700">Partition 2 leader</text>
+<text class="t" x="210.0" y="199" font-size="13">Hosted on Broker 2; append E789</text>
+<path class="l d" d="M130 214v30H110v24"/>
+<path class="l d" d="M290 214v30H310v24"/>
+<rect class="b" x="18" y="275" width="184" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="110.0" y="302" font-size="16" font-weight="700">Broker 1</text>
+<text class="t" x="110.0" y="324" font-size="13">P2 follower replica</text>
+<rect class="b" x="218" y="275" width="184" height="64" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="310.0" y="302" font-size="16" font-weight="700">Broker 3</text>
+<text class="t" x="310.0" y="324" font-size="13">P2 follower replica</text>
+<text class="t" x="210" y="368" font-size="13">Dashed arrows = replication</text>
+<text class="t" x="210" y="407" font-size="16" font-weight="700">Reading the same stored record</text>
+<rect class="b" x="38" y="430" width="344" height="64" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="457" font-size="16" font-weight="700">Same P2 leader (Broker 2)</text>
+<text class="t" x="210.0" y="479" font-size="13">E789 at offset 102 remains in the log</text>
+<path class="l both" d="M110 501v67"/>
+<path class="l both" d="M310 501v67"/>
+<text class="t" x="210" y="530" font-size="13">fetch ↑</text>
+<text class="t" x="210" y="551" font-size="13">records ↓</text>
+<rect class="b" x="18" y="575" width="184" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="110.0" y="602" font-size="14" font-weight="700">Notification group</text>
+<text class="t" x="110.0" y="624" font-size="13">P2 → one consumer</text>
+<text class="t" x="110.0" y="644" font-size="13">next offset: 103</text>
+<rect class="b" x="218" y="575" width="184" height="84" rx="9" fill="#edf5fb" stroke="#8aaac2"/>
+<text class="t" x="310.0" y="602" font-size="14" font-weight="700">Reconciliation group</text>
+<text class="t" x="310.0" y="624" font-size="13">P2 → one consumer</text>
+<text class="t" x="310.0" y="644" font-size="13">next offset: 102</text>
+<rect class="b" x="38" y="690" width="344" height="84" rx="9" fill="#fff5df" stroke="#c8a85a"/>
+<text class="t" x="210.0" y="717" font-size="16" font-weight="700">Independent progress</text>
+<text class="t" x="210.0" y="739" font-size="13">Notification has processed E789.</text>
+<text class="t" x="210.0" y="759" font-size="13">Reconciliation can still read it.</text>
+<rect class="b" x="38" y="805" width="344" height="64" rx="9" fill="#e8f7f1" stroke="#72aa93"/>
+<text class="t" x="210.0" y="832" font-size="16" font-weight="700">Leader failure</text>
+<text class="t" x="210.0" y="854" font-size="13">Eligible replica takes over; P2 stays P2.</text>
 </svg>
