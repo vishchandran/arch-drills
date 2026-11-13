@@ -4,9 +4,11 @@
 
 **Status:** Complete
 
-A bank's Distributed Scheduler durably records future and recurring work, detects jobs when they become eligible, grants one fenced execution authority, and dispatches execution intent without making the scheduler the owner of financial truth. The accepted design is **Scheduling API → sharded Schedule Database → due-job detector → atomic claim + lease + fencing token → transactional outbox → Kafka → workers → Transfer Service → ledger**, with reconciliation, priority isolation, synchronous cross-region durability and quorum-safe per-shard recovery.
+At 8:30 AM, a customer schedules a **$5,000 transfer for 9:00 AM**. The bank accepts the request and shows it as scheduled. At 9:00, a Scheduler node finds the payment and begins dispatching it. Then the node pauses, another node takes over, and Kafka later redelivers the same command. The customer intended one transfer. A design that turns those retries into two debits is incorrect, even if every individual service behaved as configured.
 
-**The Scheduler owns time and dispatch intent; the Transfer Service and ledger own the financial outcome.** Delivery is at least once. Stable execution IDs and authoritative idempotency turn repeated delivery into one financial effect. The recovery objectives are **RPO 0** for committed schedules and execution state and **RTO 5 minutes** for regional recovery. Numerical scenarios are exercises; production targets, capacity and sign-offs still require evidence.
+This chapter designs the distributed scheduling platform that prevents that outcome. The accepted path is **Scheduling API → sharded Schedule Database → due-job detector → atomic claim → transactional outbox → Kafka → workers → Transfer Service → ledger**. Leases and fencing tokens control competing Scheduler nodes. Stable execution IDs and authoritative idempotency protect the financial effect. Synchronous cross-region quorum protects committed scheduler state.
+
+The central ownership rule is: **the Scheduler owns time and dispatch intent; the Transfer Service and ledger own the financial outcome.** Delivery is at least once, so correctness comes from durable identity and reconciliation rather than a claim of exactly-once transport. The recovery objectives are **RPO 0** for acknowledged scheduler state and **RTO 5 minutes** for regional recovery. Numerical scenarios are teaching exercises; production thresholds, capacity and sign-offs still require measured evidence.
 
 ## Contents
 
@@ -14,13 +16,12 @@ A bank's Distributed Scheduler durably records future and recurring work, detect
 - [Final Architecture](#final-architecture)
 - [End-to-End Flow](#end-to-end-flow)
 - [Component Responsibilities](#component-responsibilities)
-- [Key Architecture Decisions](#key-architecture-decisions)
-- [Classification, Preferences & Routing](#classification-preferences--routing)
 - [Data & Consistency](#data--consistency)
 - [Scaling](#scaling)
 - [Reliability & Failure Modes](#reliability--failure-modes)
 - [Security](#security)
 - [Observability](#observability)
+- [Key Architecture Decisions](#key-architecture-decisions)
 - [Constraint Mutations](#constraint-mutations)
 - [Adversarial Architecture Review](#adversarial-architecture-review)
 - [AI Intersection](#ai-intersection)
@@ -33,6 +34,15 @@ A bank's Distributed Scheduler durably records future and recurring work, detect
 - [Mental Models](#mental-models)
 
 ## Problem & Requirements
+
+The business request sounds simple: remember a payment and start it at the requested time. The engineering problem is harder because the scheduled time may arrive during a process crash, a deployment, a network partition or a regional outage. The platform must recover without losing the payment and without applying it twice.
+
+For the $5,000 example, four conditions must all hold:
+
+1. The bank must not acknowledge the schedule until the intent is durable.
+2. At 9:00 AM, several Scheduler nodes may discover the same due row, but only one current owner may dispatch it.
+3. If dispatch or the financial result is uncertain, every retry must preserve the same execution identity.
+4. The Transfer Service and ledger must enforce one financial effect for that identity.
 
 | Requirement | Decision and consequence |
 |---|---|
@@ -47,122 +57,96 @@ A bank's Distributed Scheduler durably records future and recurring work, detect
 | Regional continuity | Synchronous cross-region quorum for committed state, per-shard authority, fencing and rehearsed failover/failback: **RPO 0, RTO 5 minutes**. |
 | Operability and auditability | Trace schedule → occurrence → claim → dispatch → financial outcome; prove recovery and reconciliation before launch. |
 
-A cron process answers “what should run on this machine?” A distributed financial scheduler must additionally answer **where durable intent lives, who owns an occurrence, what happens after every crash boundary, and how repeated dispatch avoids repeated money movement**. It coordinates time; it does not absorb Transfer Service or ledger responsibilities.
+A cron process answers “what should run on this machine?” A distributed financial scheduler must additionally answer **where durable intent lives, who owns an occurrence, what happens after every crash boundary, and how repeated dispatch avoids repeated money movement**. The Scheduler coordinates time and handoff. It must never bypass financial authorization, invent a transfer outcome or become a second ledger.
+
+**Scope boundary.** The chapter covers one-time and recurring schedules, dispatch, failure recovery and the handoff to an existing Transfer Service. It does not redesign payment authorization, account limits, sanctions controls or double-entry accounting.
+
+**Inputs still requiring production validation.** Traffic distribution, recurrence mix, record size, retention, shard count, Kafka partitions, safe Transfer Service rate, cross-region write latency and alert thresholds were not established by the drill. The examples below explain reasoning; they are not benchmark results.
 
 ## Final Architecture
 
-### Scheduled intent to financial outcome
+The baseline diagram comes first so the normal payment path is clear before leases, fencing and regional recovery are introduced.
+
+### Architecture at a glance
 
 ![Distributed scheduler final architecture](assets/scheduler-flow.svg)
 
 [Open the scalable scheduler-flow diagram](assets/scheduler-flow.svg)
 
-### Claim, lease and fencing boundary
+The API stores schedule intent in the authoritative database. Due-job detectors find eligible executions through indexed queries. A successful claim creates durable dispatch intent in the transactional outbox. Kafka buffers that intent for workers, while the Transfer Service and ledger enforce the financial result. The normal path remains valid even though the transport can redeliver.
 
-![Atomic claim and fenced execution authority](assets/claim-fencing.svg)
+### Baseline and extensions
 
-[Open the scalable claim and fencing diagram](assets/claim-fencing.svg)
-
-### Quorum-safe regional recovery
-
-![Per-shard cross-region durability and recovery](assets/multi-region-dr.svg)
-
-[Open the scalable multi-region DR diagram](assets/multi-region-dr.svg)
-
-Blue denotes services and transport, green successful progress, purple durable state, amber policy or recovery controls, red rejected stale authority, and grey passive components. The SVGs use Topic 8's narrow layout and palette for readable rendering on mobile and desktop.
+The baseline contains the Scheduling API, one logical authoritative Schedule Database, due-job detection, atomic claims, the outbox/Kafka handoff, workers and Transfer Service idempotency. Sharding and cross-region quorum extend that baseline to meet scale and recovery requirements. They do not change the stable schedule and execution identities.
 
 ## End-to-End Flow
 
-1. **Accept:** authenticate and validate a one-time or recurring request. The client supplies an idempotency key; the API resolves it to one durable `scheduleId` and returns only after the write meets cross-region commit policy.
-2. **Persist:** store schedule definition, state, normalized time data and the next eligible occurrence. For a financial occurrence, create a stable `executionId` such as `scheduleId + occurrenceInstant` under a uniqueness constraint.
-3. **Detect:** shard-local detectors query an indexed time range using database time and bounded batches. They do not scan the full table or rely on one process timer.
-4. **Claim:** one contender atomically changes an eligible execution to claimed, records `leaseUntil`, owner and a monotonically increasing fencing token. Conditional update or locked selection prevents two successful claims.
-5. **Dispatch durably:** in the same transaction as the state transition, write an outbox record containing the stable execution ID, token and minimal command data. The relay retries publication to Kafka and marks publication progress.
-6. **Execute safely:** workers consume at least once and call the Transfer Service using the same execution ID. The Transfer Service checks idempotency in its authoritative database transaction and the ledger enforces a unique financial reference.
-7. **Record outcome:** the Transfer Service publishes a payment-outcome event through its own outbox. The Scheduler records `Succeeded`, `Failed`, `Unknown` or retry state, but the ledger remains the authority for money movement.
-8. **Recover:** expired claims may be reclaimed with a higher token. A downstream that accepts tokens rejects stale work. For a financial call with an unknown outcome, reconcile by execution ID before retrying.
-9. **Advance recurrence:** after materializing the current occurrence, compute the next local-time occurrence from the pinned rule and time-zone policy. Each occurrence has independent state and identity.
-10. **Control overload:** admission and dispatch rates respect global Transfer Service capacity. Critical payments use reserved lanes; routine and bulk work wait without losing durable intent.
-11. **Survive region loss:** quorum determines each shard's surviving authority. Fence the failed side, promote only with a majority and current log, restore useful service within five minutes, then fail back through synchronization and controlled ownership transfer.
+The customer schedules transfer `S-501` for 9:00 AM. Its 9:00 occurrence becomes execution `E-501-0900`.
+
+1. **Accept the schedule.** The channel sends the payment details, requested local time, time zone and an idempotency key. The API authenticates the caller, validates the rule and maps repeated identical requests to the same `scheduleId=S-501`.
+2. **Persist durable intent.** The database stores the schedule, normalized timing data and next occurrence. The API responds only after the write satisfies the cross-region commit policy. A successful response therefore means the bank can recover the schedule after a process or regional failure.
+3. **Materialize the occurrence.** The platform creates `executionId=E-501-0900` under a uniqueness constraint. A recurring schedule receives a different deterministic execution ID for every occurrence.
+4. **Discover due work.** At 9:00 AM, shard-local detectors query an indexed due-time range in bounded batches. More than one detector may see the row; discovery does not grant execution authority.
+5. **Claim atomically.** One contender changes the row from `Due` to `Claimed`, records its lease and receives the next fencing token. Other contenders fail the conditional update.
+6. **Commit dispatch intent.** The same database transaction writes an outbox record for `E-501-0900`. This prevents a crash between “claimed” and “remembered for publication” from losing the payment.
+7. **Publish and consume.** The outbox relay publishes to Kafka. A worker consumes the command and calls the Transfer Service with the original execution ID. Publication and consumption are at least once, so duplicates are expected.
+8. **Apply one financial effect.** The Transfer Service stores `E-501-0900` atomically with the transfer and ledger entries. A repeated request with the same identity returns the stored result rather than creating another $5,000 debit.
+9. **Record the outcome.** The Transfer Service publishes its outcome through its own outbox. The Scheduler records success, failure or an unknown result, while the ledger remains the authority for the money movement.
+10. **Recover safely.** If the first Scheduler pauses, a new owner may reclaim the expired lease with a higher token. If the worker times out after the transfer committed, reconciliation looks up `E-501-0900` before any retry.
+
+**Recurring schedules.** After materializing the current occurrence, the Scheduler calculates the next occurrence from the stored local-time rule and time-zone policy. It does not derive “9:00 AM tomorrow” by blindly adding 24 hours to a UTC timestamp.
 
 ## Component Responsibilities
 
-| Component | Responsibility / boundary |
+| Component | Responsibility, purpose and boundary |
 |---|---|
-| Scheduling API | Authentication, authorization, validation, request idempotency, create/update/cancel and status; no in-memory-only schedules. |
-| Shard router / metadata | Stable route from tenant/customer or schedule key to shard; versioned mapping and controlled resharding. |
-| Schedule Database | Authoritative schedule, occurrence, claim, lease, token, outbox and audit state; indexed due-time access. |
-| Due-job detector | Find bounded eligible work per shard, fairly and repeatedly; tolerate overlap and missed polling cycles. |
-| Claim coordinator | Atomic state transition, lease renewal, token increment and ownership rules. |
-| Outbox relay | Publish committed dispatch intent to Kafka, retry safely and expose lag; not proof of execution. |
-| Kafka | Durable buffering, partitions, consumer groups and redelivery; not the financial idempotency authority. |
-| Execution workers | Validate command, honor priority and capacity controls, call Transfer Service and preserve execution identity. |
-| Transfer Service + ledger | Authorize and atomically enforce one financial effect per execution ID; return/reconcile authoritative outcome. |
-| Retry / DLQ / replay operations | Bounded retries, unknown-outcome reconciliation, poison-work quarantine and controlled replay. |
-| Quorum / shard authority control | Cross-region commit, leader/term ownership, fencing, failover and failback for each shard. |
-| Observability / SRE / audit | End-to-end evidence, SLOs, alerts, capacity and recovery operations. |
+| Scheduling API | Authenticates, authorizes and validates create/update/cancel/status requests; request idempotency prevents duplicate schedules.<br>**Why:** Channels need one durable contract.<br>**Boundary:** It does not execute transfers or keep acknowledged schedules only in memory. |
+| Shard router / metadata | Maps a stable tenant/customer or schedule key to its current shard.<br>**Why:** Callers must find the authoritative owner as data grows.<br>**Boundary:** Mapping changes are versioned migrations, not arbitrary rerouting. |
+| Schedule Database | Owns schedule, occurrence, claim, lease, fencing token, outbox and audit state.<br>**Why:** Recovery needs one durable record of intent and progress.<br>**Boundary:** It records scheduling state, not the authoritative financial balance. |
+| Due-job detector | Queries indexed time ranges and proposes bounded eligible batches.<br>**Why:** Millions of future schedules cannot live as process timers.<br>**Boundary:** Seeing a row does not authorize dispatch. |
+| Claim coordinator | Performs the conditional state change, lease assignment and token increment.<br>**Why:** Competing nodes need one current owner.<br>**Boundary:** A lease alone cannot stop a stale owner after it resumes. |
+| Outbox relay | Publishes committed dispatch records and exposes publication lag.<br>**Why:** Database commit and Kafka publish cannot be one ordinary transaction.<br>**Boundary:** “Published” is not “money moved.” |
+| Kafka | Buffers commands, partitions work and redelivers after failure.<br>**Why:** Workers and the Scheduler recover independently.<br>**Boundary:** Broker guarantees do not provide ledger idempotency. |
+| Execution workers | Preserve identity, obey priority/capacity controls and call the Transfer Service.<br>**Why:** Execution can scale independently from due detection.<br>**Boundary:** Workers do not generate a new ID on retry. |
+| Transfer Service + ledger | Reauthorize and atomically enforce one financial effect per execution ID.<br>**Why:** This is the authoritative external-effect boundary.<br>**Boundary:** The Scheduler cannot declare a debit successful on its behalf. |
+| Retry / DLQ / reconciliation | Classifies failures, resolves unknown outcomes, quarantines poison work and controls replay.<br>**Why:** Not every failure should be retried in the same way.<br>**Boundary:** Replay preserves original identities and capacity limits. |
+| Quorum / shard authority control | Establishes one regional leader/term per shard and fences previous authority.<br>**Why:** RPO 0 and safe failover require durable agreement.<br>**Boundary:** A minority partition must stop. |
+| Observability / SRE / audit | Measures lateness, correctness signals, capacity and recovery; supplies runbooks and evidence.<br>**Why:** A healthy process can still deliver a payment late.<br>**Boundary:** Telemetry supports decisions but does not replace the authoritative records. |
 
-## Key Architecture Decisions
+## Data & Consistency
 
-| Decision / disposition | Why and trade-off |
-|---|---|
-| **Accepted:** durable database is schedule authority | Timers and Kafka delays are accelerators, not the only copy; indexed polling adds database load. |
-| **Accepted:** atomic claim + lease + monotonically increasing fencing token | Leases recover abandoned work; fencing protects against a paused former owner. Token enforcement is required at mutable boundaries. |
-| **Accepted:** transactional outbox before Kafka | Removes the database-commit/publish gap; relay and broker may duplicate messages. |
-| **Accepted:** stable execution ID at Scheduler, Transfer Service and ledger | Converts redelivery, retry and failover into one financial effect; requires retained idempotency history and payload consistency checks. |
-| **Accepted:** one occurrence row per recurring fire | Gives each run identity, status and audit evidence; increases storage and lifecycle work. |
-| **Accepted:** database sharding with shard-local due indexes | Scales writes and polling; introduces routing, rebalancing and per-shard recovery complexity. |
-| **Accepted:** global backpressure plus reserved priority capacity | Protects Transfer Service and critical payments; routine work may become late. |
-| **Accepted:** synchronous cross-region quorum per shard | Meets RPO 0 for acknowledged commits and safe authority transfer; raises write latency and may reject writes without quorum. |
-| **Accepted:** RTO 5 minutes is a release gate | Makes recovery measurable; demands pre-provisioning, automation and rehearsals. |
-| **Accepted:** AI is asynchronous and advisory | Forecasting and anomaly insight can help without controlling financial correctness. |
-| **Rejected:** one cron leader with local memory | Loses work/ownership evidence and creates a single failure and scale boundary. |
-| **Rejected:** `SELECT` then later `UPDATE` as a claim | Two workers can observe and dispatch the same row. |
-| **Rejected:** lease expiry alone proves old worker stopped | A paused worker can resume after expiry; only enforceable fencing closes that race. |
-| **Rejected:** Kafka exactly-once means exactly-once debit | Broker scope does not atomically include the Transfer Service and ledger. |
-| **Rejected:** asynchronous cross-region replicas for RPO 0 | An acknowledged commit may be absent after regional loss. |
-| **Rejected:** active-active writers without quorum ownership | Partitioned regions can both dispatch the same shard. |
-| **Rejected:** unlimited retry or release all backlog at once | Amplifies dependency failure and overload. |
+The database is authoritative for schedule and dispatch state; the Transfer Service and ledger are authoritative for the financial outcome. Process memory, Kafka offsets and worker logs are useful evidence, but none can replace those owners.
 
-The final Architecture Review Board defense prioritized **financial correctness**, **exclusive distributed ownership with durable recovery**, and **controlled execution under constrained capacity**.
+The data model separates three ideas that are easy to blur:
 
-## Classification, Preferences & Routing
+- A **schedule** is the customer's one-time or recurring instruction.
+- An **occurrence** is one calendar firing of that instruction.
+- An **execution** is the stable unit of dispatch and financial idempotency for that occurrence.
 
-Scheduling policy classifies work by **timing model, priority, misfire behavior and financial criticality** before dispatch. Routing selects the owning database shard, Kafka partition, worker lane and Transfer Service capacity budget. These decisions are deterministic and versioned; they do not depend on a worker's local clock or an AI prediction.
+For example, schedule `S-501` may run every weekday at 9:00 AM. Monday and Tuesday are separate occurrences with separate execution IDs. Retrying Monday must reuse Monday's identity; it must not create Tuesday's identity or a second Monday debit.
 
-| Class / example | Scheduling and constrained-capacity behavior |
-|---|---|
-| Critical financial — regulatory or time-bound payment | Reserved dispatch and Transfer Service capacity; immediate recovery within authorization and ledger controls. |
-| Standard financial — scheduled transfer or bill payment | Execute within its lateness SLO; queue durably and reconcile unknown outcomes before retry. |
-| Recurring routine — periodic account sweep | Apply its explicit time-zone, misfire and catch-up policy; do not issue every missed transfer automatically. |
-| Bulk / administrative — reports or maintenance | Throttle or defer first; never consume the capacity reserved for critical payments. |
+### Scheduling policy, time and cancellation
 
-Priority allocates scarce capacity; it never bypasses authorization, account state, limits or ledger controls. A class label in one shared FIFO is insufficient: the design reserves worker, Kafka, database and Transfer Service capacity for the lanes that must remain available.
+Scheduling policy classifies work by timing model, priority, misfire behavior and financial criticality. Routing then selects the database shard, Kafka partition, worker lane and Transfer Service capacity budget. These decisions are deterministic and versioned.
 
-### Time model
-
-Persist instants in UTC and preserve the user's scheduling intent separately: original local date/time, IANA time-zone ID such as `America/Toronto`, recurrence rule, daylight-saving policy and rule version. An offset such as `-05:00` is not a time zone and cannot describe future transitions.
+Persist instants in UTC and preserve the user's scheduling intent separately: original local date/time, IANA time-zone ID such as `America/Toronto`, recurrence rule, daylight-saving policy and rule version. An offset such as `-05:00` is not a time zone because it cannot describe future daylight-saving transitions.
 
 | Case | Explicit policy |
 |---|---|
 | One-time instant | Convert the validated local request to one UTC instant and retain the original context for audit. |
-| Spring-forward nonexistent local time | Reject, move to the next valid instant or apply a product-specific rule; never silently guess. |
-| Fall-back ambiguous local time | Select first/second occurrence or require disambiguation; persist the choice. |
-| Daily local-time recurrence | Recalculate from local calendar intent and zone rules; do not add 24 hours to the prior UTC instant. |
-| Fixed elapsed interval | Add the specified duration; this is different from “same local time every day.” |
-| Time-zone rule update | Define whether future occurrences use current rules or pinned rules; record the effective version. |
+| Spring-forward nonexistent local time | Reject, move to the next valid instant or apply an approved product rule; never guess silently. |
+| Fall-back ambiguous local time | Select the first or second occurrence, or require disambiguation; persist the choice. |
+| Daily local-time recurrence | Recalculate from local calendar intent and zone rules; do not add 24 hours to the previous UTC instant. |
+| Fixed elapsed interval | Add the specified duration; this differs from “same local time every day.” |
+| Time-zone rule update | Define whether future occurrences use current or pinned rules and record the effective version. |
 
-### Recurrence, misfire and cancellation
+On the spring-forward date in Toronto, **2:30 AM does not exist**. The product must define whether that occurrence is rejected, skipped or moved. During the fall-back transition, **1:30 AM occurs twice**. The stored policy determines which instant is intended. These are financial behavior decisions, not parser details.
 
-Materialize only a bounded horizon or the next occurrence so an unbounded recurrence does not create infinite rows. Advance with compare-and-set so competing schedulers cannot materialize the same occurrence twice. A unique key on `(scheduleId, occurrenceKey)` is the final duplicate guard.
+Materialize only the next occurrence or a bounded horizon. A unique `(scheduleId, occurrenceKey)` prevents competing nodes from creating the same occurrence twice. A **misfire** means an occurrence became due but was not dispatched within its expected window. Policy may execute immediately, skip, coalesce or replay a bounded count; after a three-day outage, the bank must not blindly issue every missed debit.
 
-A **misfire** is an occurrence that became due but was not dispatched within its expected window. Policy is business-specific: execute immediately, skip, coalesce missed occurrences, or replay a bounded number. A recurring payment should not automatically issue every missed debit after a long outage. Persist the selected policy and expose misfire count and age.
+Cancellation is a state transition, not deletion. If cancellation wins before claim, the occurrence is suppressed. If dispatch already committed, the API returns `too_late` or `cancellation_pending` and follows the Transfer Service's supported process. Deleting a row cannot recall a Kafka command or reverse a debit.
 
-Cancellation is a state transition, not deletion. If cancellation wins before claim/dispatch, suppress the occurrence. If dispatch already committed, the API returns an explicit `too_late` or `cancellation_pending` result and coordinates with the Transfer Service where cancellation is supported. A tombstone and audit record prevent recovery code from recreating cancelled work. Never promise that deleting a row recalls a Kafka message or reverses a debit.
-
-Clock skew is bounded operationally and reduced by using authoritative database time for eligibility and leases. Monotonic elapsed time helps local lease renewal, but persisted comparisons use a shared time source. Alert on NTP drift; safety still relies on atomic state and fencing, not perfect clocks.
-
-## Data & Consistency
+Clock skew is reduced by using database time for eligibility and persisted leases. Nodes still monitor NTP drift, but safety relies on atomic state, uniqueness and fencing rather than perfectly synchronized clocks.
 
 ### Core records
 
@@ -178,13 +162,25 @@ Clock skew is bounded operationally and reduced by using authoritative database 
 
 ### Atomic claim and fencing
 
-An eligible claim is a single conditional write: state is due or the prior lease expired, cancellation is absent, and the expected version still matches. The transaction increments the fencing token and may write the dispatch outbox. If two workers race, at most one conditional update succeeds.
+A **claim** is the atomic database transition that grants one worker the right to dispatch an execution. A **lease** makes that ownership temporary: if the owner disappears, another worker can recover after `leaseUntil`. An eligible claim is one conditional write: state is due or the previous lease expired, cancellation is absent and the expected version still matches.
 
-A lease is a liveness mechanism: another worker can recover after the owner disappears. It is not a safety mechanism once the old worker has read the job. Every downstream mutation that can be fenced stores the greatest accepted token for that resource or shard and rejects smaller tokens. For the financial side effect, the stable execution ID is the non-negotiable guard even when token propagation is unavailable.
+The diagram shows why the lease is not enough.
+
+![Atomic claim and fenced execution authority](assets/claim-fencing.svg)
+
+[Open the scalable claim and fencing diagram](assets/claim-fencing.svg)
+
+Worker A claims `E-100` with token 41 and then pauses. Its lease expires, so Worker B reclaims the execution with token 42. If A resumes, both workers may believe they should continue. A **fencing token** is a monotonically increasing ownership number. A downstream boundary remembers the greatest accepted token and rejects 41 after observing 42.
+
+A lease therefore provides **liveness**—work can be recovered. Fencing provides **stale-owner safety**. For the financial side effect, the stable execution ID remains the non-negotiable guard even when every downstream cannot enforce tokens.
 
 ### Transactional outbox and Kafka
 
-Writing `Dispatched` and publishing to Kafka cannot be one ordinary atomic transaction. The outbox keeps the database transition and publication intent together. The relay may publish, crash before marking published, and publish again. Kafka may redeliver after a consumer crash. Therefore:
+A **transactional outbox** stores the business state change and an event-to-publish row in the same local database transaction. It solves a specific crash window: without it, the Scheduler could mark `E-501-0900` as dispatched, crash before publishing to Kafka and lose the only reminder to send the payment.
+
+The relay can poll the outbox or use **change data capture (CDC)**, which streams committed database changes from the transaction log. CDC changes how committed rows are detected; it does not remove the need for the outbox record, stable IDs or duplicate handling.
+
+The outbox does not create exactly-once delivery. The relay may publish, crash before marking the row published and send it again. Kafka may also redeliver after a consumer crash. Therefore:
 
 - reuse `eventId` and `executionId` on every publication attempt;
 - key records for required ordering, without assuming global order;
@@ -194,11 +190,24 @@ Writing `Dispatched` and publishing to Kafka cannot be one ordinary atomic trans
 
 ### Financial idempotency and reconciliation
 
-The Scheduler's unique execution row prevents duplicate intent but cannot atomically cover a remote debit. The Transfer Service must enforce a unique execution ID in the same authoritative transaction as the transfer and ledger entries. A repeated ID with the same request returns the stored result; the same ID with a different payload is a conflict and an alert.
+**Idempotency** means repeating the same logical operation produces the same final effect. The Scheduler's unique execution row prevents duplicate dispatch intent but cannot atomically cover a remote debit. The Transfer Service must enforce a unique execution ID in the same authoritative transaction as the transfer and ledger entries. A repeated ID with the same request returns the stored result; the same ID with a different payload is a conflict and an alert.
 
 If the worker times out after the Transfer Service commits, the outcome is **unknown**, not failed. Query/reconcile by execution ID before retrying. Transfer outcome events use the Transfer Service's outbox so committed money movement and outcome intent do not diverge. Periodic reconciliation compares Scheduler executions, transfer records and ledger references; discrepancies enter an owned exception workflow.
 
 ## Scaling
+
+Scaling a Scheduler is not only a question of how many rows it can scan. The system must find due work without creating a database hotspot, distribute ownership without losing ordering requirements and keep the dispatch rate inside the Transfer Service's safe capacity.
+
+### Capacity exercises that changed the reasoning
+
+| Exercise | Result and implication |
+|---|---|
+| 20,000 executions become due each second; Transfer Service accepts 12,000/sec | **Backlog growth:** 8,000/sec, or **28.8 million/hour**<br>Adding Scheduler workers increases pressure unless downstream capacity changes. |
+| A 30-minute Kafka outage at 12,000 eligible executions/sec | **Accumulated intent:** 21.6 million executions<br>Recovery needs outbox storage, Kafka capacity and a paced drain plan. |
+| Recovery dispatches 18,000/sec while 12,000/sec of new work continues | **Net drain:** 6,000/sec<br>A 21.6 million backlog needs about **60 minutes** to drain, assuming the higher rate is safe and sustained. |
+| One customer contributes 40% of a shard's due rows | Fleet averages can look healthy while one shard is late<br>Use per-tenant fairness, quotas and a controlled routing-key migration. |
+
+These are hypothetical exercises, not verified production measurements. Their purpose is to expose the capacity relationships that tests must prove.
 
 - **Due index:** index `(state, dueAt)` or shard/time-bucket equivalents. Fetch small ordered batches and use a look-ahead window. Avoid full-table scans and one giant hot queue.
 - **Sharding:** route by stable customer/tenant key where ordering or per-customer controls matter. Each shard owns schedule, execution and outbox state together. Cross-shard business operations remain outside the Scheduler.
@@ -208,11 +217,15 @@ If the worker times out after the Transfer Service commits, the outcome is **unk
 - **Backpressure:** bound in-flight calls and adjust dispatcher admission from Transfer Service latency, errors, quota and queue age. Polling more due rows does not create downstream capacity.
 - **Priority:** separate critical, standard and bulk lanes with reserved worker, database, Kafka and Transfer Service capacity. Labels in one FIFO do not isolate resources.
 
-If 20K jobs/sec become due and Transfer Service safely accepts 12K/sec, backlog grows by **8K/sec or 28.8 million/hour**. More scheduler workers worsen pressure unless downstream capacity changes. During overload, preserve durable intent, admit at the safe global rate, reserve critical capacity, defer lower classes and expose projected drain time. Backlog drains only while sustainable completion exceeds new eligible arrivals.
+During overload, preserve durable intent, admit at the safe global rate, reserve critical capacity, defer lower classes and expose projected drain time. Backlog drains only while sustainable completion exceeds new eligible arrivals.
 
 Global rate limiting cannot be a disconnected per-worker guess. Allocate regional/shard budgets from one capacity policy with conservative local fallback. Include new work, retries, replay and DR recovery in the same envelope. Prefer shedding new optional schedules at the API over accepting work that cannot meet its contract; never silently drop committed financial jobs.
 
+Priority determines how the safe budget is allocated. Critical time-bound payments receive reserved capacity. Standard scheduled transfers use the remaining committed lane. Routine recurrence and bulk administrative work can wait longer. Priority never bypasses authorization or ledger rules, and labels in one shared FIFO do not provide isolation; the worker, Kafka, database and Transfer Service budgets must support the separation.
+
 ## Reliability & Failure Modes
+
+Failure handling begins with one Scheduler node and expands outward to Kafka, the Transfer Service, the database and an entire region. At every boundary, the design asks two questions: **what durable evidence remains, and can a repeated action create another financial effect?**
 
 | Failure | Containment and recovery |
 |---|---|
@@ -238,7 +251,15 @@ Retry policy separates transient, permanent and unknown outcomes. Circuit breake
 
 ### Multi-region durability and recovery
 
-RPO 0 means every acknowledged schedule, cancellation, claim and execution transition required for correctness survives loss of either region. The accepted design commits through a cross-region majority for each shard. A two-region topology therefore needs a quorum arrangement that does not let both isolated regions form authority—commonly an odd voting set or a managed consensus system with a third failure domain. Two independent regional primaries are not a quorum.
+**Recovery Point Objective (RPO)** is the maximum accepted loss of committed data after recovery. RPO 0 means every acknowledged schedule, cancellation and execution transition needed for correctness must survive loss of either region. **Recovery Time Objective (RTO)** is the target time to restore useful service; here it is five minutes.
+
+The accepted design commits through a cross-region **quorum**, the minimum voting majority required to acknowledge state and establish authority. A two-region topology needs an arrangement that prevents both isolated regions from forming separate majorities—commonly an odd voting set or a managed consensus system with a third failure domain. Two independent regional primaries are not a quorum.
+
+![Per-shard cross-region durability and recovery](assets/multi-region-dr.svg)
+
+[Open the scalable multi-region DR diagram](assets/multi-region-dr.svg)
+
+In the diagram, Region A owns shard 7 in term 81. If A fails, Region B may take ownership only after the surviving voters confirm the current committed log. Promotion advances the term to 82, which fences term 81. This prevents the isolated old region from resuming dispatch when its network returns.
 
 | Control | Required design / evidence |
 |---|---|
@@ -254,6 +275,8 @@ RPO 0 means every acknowledged schedule, cancellation, claim and execution trans
 Failover is per shard so healthy shards need not move. Automation must prevent a mass promotion from releasing the whole backlog simultaneously. A five-minute RTO includes detection, decision, fencing, promotion, routing and resumption. RPO 0 does not promise zero duplicate delivery; stable IDs and reconciliation handle repeated attempts.
 
 ## Security
+
+The most important security boundary is the handoff to the Transfer Service. A valid Scheduler command proves that an approved schedule reached execution; it does not prove that the transfer is still allowed. The Transfer Service must reapply account status, limits, sanctions and other financial controls at execution time.
 
 | Area | Control |
 |---|---|
@@ -285,6 +308,34 @@ The Scheduler is authoritative for recorded schedule and dispatch workflow. The 
 | Failover phase and measured restoration time | RTO evidence per shard and region. |
 
 Define SLOs for create durability, dispatch lateness by priority, terminal financial outcome, reconciliation age and regional restoration. “Service is up” does not satisfy a schedule that is 20 minutes late. Dashboards separate **API / Scheduling / Dispatch / Financial Outcomes / Capacity / DR / Exceptions**; alerts have thresholds, sustained windows, named owners and runbooks.
+
+For `E-501-0900`, a trace should answer: when was the schedule accepted, when did it become due, who claimed it, which token was used, when did the outbox publish, which Kafka record was consumed, what did the Transfer Service record and which ledger reference proves the outcome? That chain supports both incident response and financial investigation without placing sensitive payment data in ordinary logs.
+
+## Key Architecture Decisions
+
+The decisions below follow from the failure examples rather than from a preference for distributed components.
+
+| Decision / disposition | Reasoning and trade-off |
+|---|---|
+| **Accepted:** durable database is schedule authority | Process timers and Kafka delays cannot be the only copy of a bank-acknowledged instruction. Indexed polling adds database load but makes work recoverable and queryable. |
+| **Accepted:** atomic claim, lease and fencing token | The claim chooses one current owner; the lease permits recovery; fencing rejects a former owner that resumes. Token enforcement adds state to downstream boundaries. |
+| **Accepted:** transactional outbox before Kafka | It closes the local database-commit/publish gap. The cost is an outbox relay, retained rows and duplicate publication handling. |
+| **Accepted:** stable execution ID at Scheduler, Transfer Service and ledger | It converts redelivery, retry and failover into one financial effect. Idempotency history and payload hashes must outlive every supported replay horizon. |
+| **Accepted:** one occurrence row per recurring firing | Every run receives independent identity, status and audit evidence. Storage and lifecycle management increase. |
+| **Accepted:** sharded database with shard-local due indexes | It distributes storage, writes and polling. Routing, rebalancing, hot shards and per-shard recovery become explicit operational work. |
+| **Accepted:** global backpressure and reserved priority capacity | It protects Transfer Service and critical payments during overload. Standard or bulk work can become late and must expose that impact. |
+| **Accepted:** synchronous cross-region quorum per shard | It supports RPO 0 and safe authority transfer. Cross-region latency rises and the system must stop when it cannot form a safe majority. |
+| **Accepted:** RTO 5 minutes is a release gate | Recovery becomes a measurable capability rather than a diagram. Pre-provisioning, automation and repeated rehearsals are required. |
+| **Accepted:** AI remains asynchronous and advisory | Forecasting and anomaly detection may help operations without becoming a financial correctness dependency. |
+| **Rejected:** one cron leader with local memory | A process crash loses intent or ownership evidence and creates one scale/failure boundary. |
+| **Rejected:** `SELECT` followed later by `UPDATE` as a claim | Two workers can read the same due row before either update occurs. |
+| **Rejected:** lease expiry proves the old worker stopped | A paused worker can resume after expiry; only enforceable fencing closes the stale-owner race. |
+| **Rejected:** Kafka exactly-once means exactly-once debit | Broker guarantees do not atomically include the Transfer Service and ledger. |
+| **Rejected:** asynchronous regional replication can provide RPO 0 | An acknowledged write can be absent from the surviving region. |
+| **Rejected:** independent active-active regional writers | A partition can create competing owners and duplicate dispatch. |
+| **Rejected:** unlimited retry or unrestricted backlog release | Recovery traffic can amplify the original failure and overwhelm the Transfer Service. |
+
+The final Architecture Review Board defense prioritized **financial correctness**, **exclusive distributed ownership with durable recovery**, and **controlled execution under constrained capacity**.
 
 ## Constraint Mutations
 
@@ -334,9 +385,22 @@ Useful asynchronous work includes arrival/capacity forecasting, hot-shard predic
 | Observability / operations | SLOs, dashboards, alerts, runbooks, RACI, on-call, vendor escalation and handover. |
 | Testing / release | DIT/SIT/UAT, performance, resilience, reconciliation, DR evidence, rollout/rollback and formal Go/No-Go. |
 
-**Critical path:** approve architecture and financial identity → finalize API/event/ledger contracts → prove atomic idempotency and claim fencing → integrate end to end → prove peak/backlog/reconciliation → prove RPO 0 and RTO 5 minutes → complete security/operations/business sign-offs → canary.
+### Sequence and critical path
 
-Milestones use entry/exit criteria, dated dependency owners and evidence. The four primary workstreams—Scheduling Platform, Kafka, Transfer Service and Infrastructure—integrate through versioned contracts and shared end-to-end tests. Operational readiness begins while features are built, not after code completion.
+**Architecture and financial identity → API/event/ledger contracts → atomic idempotency and claim fencing → end-to-end integration → peak/backlog/reconciliation evidence → RPO 0 and RTO 5-minute evidence → security, operations and business sign-offs → canary.**
+
+The four primary implementation workstreams—Scheduling Platform, Kafka, Transfer Service and Infrastructure—can proceed in parallel once their contracts and ownership boundaries are stable. Their integration is the schedule-driving dependency. Security and operational readiness run throughout delivery rather than appearing after feature completion.
+
+### Milestones and evidence
+
+1. **Architecture baseline:** approved boundaries, state model, schedule/execution identity, shard ownership, fencing, RPO/RTO and decision record.
+2. **Integration-ready components:** idempotent APIs, outbox/CDC publishing, Kafka contracts, Transfer Service idempotency and usable cross-region data layer.
+3. **End-to-end correctness:** schedule → due detection → claim → Kafka → Transfer → ledger outcome, including duplicate delivery and unknown-outcome reconciliation.
+4. **Non-functional evidence:** peak and hot-shard load, Transfer capacity constraints, backlog drain, stale fencing tokens, quorum loss, failover and failback.
+5. **Production readiness:** InfoSec approval, SRE runbooks, alerts, on-call and support handover, rollback evidence and accountable residual-risk decisions.
+6. **Go/No-Go:** formal sign-offs with no unproven financial correctness or mandatory regional recovery path.
+
+Each milestone needs entry and exit criteria, a dated owner and reviewable evidence. “Development complete” does not mean the integrated financial path is ready.
 
 ## Program Risks
 
