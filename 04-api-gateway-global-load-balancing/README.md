@@ -4,11 +4,13 @@
 
 **Status:** Complete
 
-A multi-region banking platform is the vehicle for learning API policy enforcement, instance balancing, global traffic steering, regional independence, and safe failure recovery. The selected architecture separates **global region selection → regional gateway balancing → API policy/service routing → service-instance balancing**. Regional data planes serve requests using locally available configuration; the global control plane manages policy outside the request path.
+A bank operates digital banking platforms in Canada, the United States, and Europe. Customers use mobile and web applications to check balances, authenticate, manage cards, and initiate payments. When a Canadian customer requests an account balance, the platform must first decide which region may safely serve that request. Inside the selected region, it must find a healthy API Gateway, enforce API policy, route to the Balance Service, and select a healthy service instance.
 
-The drill evolved from one Canadian region to Canada, US, and Europe. A specific single-writer, five-minute recovery scenario selected **active-passive with a warm US standby**; later mutations change residency and recovery requirements. Decisions, rejected proposals, and corrections are retained below. Numerical scenarios are teaching assumptions, not measured production capacities.
+Those decisions solve different problems. **DNS resolves an entry point. Global Traffic Management selects an eligible region. A Regional Load Balancer selects a healthy gateway instance. The API Gateway enforces API policy and chooses a service. Internal load balancing or service discovery selects a healthy service instance.** The layers describe responsibilities; they do not require five separate commercial appliances.
 
-The architecture is intentionally layered by responsibility rather than product. DNS resolves an entry point, global traffic management selects an eligible region, regional load balancing selects a gateway instance, the gateway enforces API policy, and internal balancing selects a service instance. Exact vendors, SLOs, replication contracts, retry budgets, and named owners remain implementation decisions.
+The design must also survive failure. If Canada becomes unavailable, traffic cannot simply move to any region that answers a health check. The target must satisfy residency rules, have usable authentication and certificates, possess safe data and write authority, and retain enough spare capacity. For the drill's specific single-writer, five-minute recovery scenario, the selected baseline is **active-passive with a warm US standby**. Later constraint mutations deliberately change those assumptions.
+
+Regional data planes continue serving from locally available approved configuration while a global control plane manages routes and policy outside the synchronous request path. Numerical scenarios are teaching exercises rather than measured production capacity. Exact vendors, SLOs, recovery-point objectives, replication contracts, retry budgets, and named owners remain implementation decisions.
 
 ## Contents
 
@@ -39,6 +41,8 @@ The architecture is intentionally layered by responsibility rather than product.
 
 Expose mobile/web banking, payments, balances, login, OTP, beneficiaries, cards, accounts, partner APIs, and internal operational APIs. Callers include browsers, mobile apps, ATMs, merchants, fintechs, partner banks, and batch systems across Canada, US, and Europe.
 
+A single load balancer cannot safely own every decision. Region selection depends on cross-region health, capacity, policy, and residency. Gateway-instance selection depends on local health. API routing depends on the request path, method, version, identity, and quota. Banking authorization depends on account and transaction state. Separating these responsibilities limits blast radius and makes failures easier to diagnose.
+
 | Requirement | Decision and consequence |
 |---|---|
 | API entry | Route by API/path/method/version; authenticate, coarse authorize, validate, rate-limit, apply quotas<br>**Consequence:** A gateway is more than a forwarding hop. |
@@ -53,7 +57,7 @@ These are distinct exercises, not one combined capacity forecast. The 40,000 RPS
 
 ## Final Architecture
 
-The SVG diagrams separate global selection, the repeated regional path, and configuration distribution to keep each view readable on GitHub web and mobile.
+The normal request path appears first. Failure and configuration mechanics follow only after each layer's responsibility is clear.
 
 ### Global region selection
 
@@ -69,7 +73,9 @@ The SVG diagrams separate global selection, the repeated regional path, and conf
 
 [Open the scalable diagram](assets/regional-request-path.svg)
 
-Each region repeats this path across AZs. The WAF may be integrated into global/edge ingress rather than deployed as a separate regional appliance. Internal balancing can use service discovery, a service LB, a Kubernetes Service, a mesh proxy, or client-side balancing. The requirement is healthy instance selection, not another mandatory appliance.
+Each region repeats this path across availability zones (AZs). The regional load balancer spreads requests across stateless gateway instances. The gateway understands that `GET /accounts/123/balance` belongs to the Balance Service, but it should not hard-code Balance Service instance 2. Internal balancing makes that final instance choice from the healthy service pool.
+
+The WAF may be integrated into global or regional ingress rather than deployed as a separate appliance. Internal balancing may be service discovery, a service load balancer, a Kubernetes Service, a mesh proxy, or client-side balancing. The requirement is clear ownership of each decision, not a mandatory number of network hops.
 
 ### Control and data planes
 
@@ -77,7 +83,9 @@ Each region repeats this path across AZs. The WAF may be integrated into global/
 
 [Open the scalable diagram](assets/control-plane.svg)
 
-The control plane defines routes, auth policies, rate-limit policies, tenant quotas, certificate lifecycle, versions, and rollout state. Distribution propagates approved configuration. Regional data planes serve and enforce it. A control-plane outage should impair management capability while requests continue under the last-known-good configuration.
+The control plane defines routes, authentication policies, rate-limit policies, tenant quotas, certificate lifecycle, versions, and rollout state. Configuration distribution propagates approved desired state. Regional data planes enforce that state on live requests.
+
+This separation keeps management availability out of the request path. If the global control plane becomes unavailable, regional gateways continue with their locally loaded last-known-good configuration while new changes pause. That protects serving availability, but it does not extend expiring certificates or make stale security policy safe forever.
 
 ## End-to-End Flow
 
@@ -125,6 +133,8 @@ The control plane defines routes, auth policies, rate-limit policies, tenant quo
 
 ## DNS & Global Traffic Steering
 
+Global traffic management answers **which eligible region should receive this request**. Eligibility comes before optimization. A region excluded by residency, security, or data-readiness policy cannot become valid merely because it is closer or faster.
+
 | Policy | Use and safety boundary |
 |---|---|
 | Geographic | Prefer Canada for Canadian traffic<br>**Boundary:** Location alone does not establish account residency permissions. |
@@ -147,9 +157,24 @@ In the completed example, Canada is at **95% capacity**, US at **45%**, US adds 
 
 **Production clarification.** Anycast is an addressing/routing technique, not a sub-ten-second recovery guarantee. Failure detection, proxy/backend steering, network convergence, connection recovery and application readiness determine observed recovery. DNS alone also cannot inspect an authenticated account's JWT; account-specific residency requires a trustworthy routing mechanism and an enforcement boundary before prohibited processing occurs. Exact implementation remained open.
 
+### DNS failover in chronological order
+
+1. **Resolve.** The client or recursive resolver asks for `api.bank.com` and caches the answer for its time to live (TTL).
+2. **Detect.** Regional health signals indicate that Canada is failing. The traffic system applies a failure threshold rather than reacting to one transient probe.
+3. **Evaluate.** The control plane verifies that the US is an approved target with usable identity, certificates, data, dependencies, and spare capacity.
+4. **Change steering.** DNS-based steering changes new answers, while a global proxy changes its backend selection without requiring every client to resolve again.
+5. **Converge.** Fresh DNS lookups reach the US first. Clients holding the old Canadian answer may continue failing until caches and connections refresh. DNS publication and effective client convergence are therefore different moments.
+6. **Fail back carefully.** After Canada remains healthy for a sustained period, increase its weight for new requests in stages. Hysteresis prevents repeated Canada–US flapping.
+
+Traffic redirection does not promote a database, repair replication, restore certificates, or resolve an unknown payment outcome. Those readiness signals must come from the owning platforms before the region becomes eligible.
+
 ## Data & Consistency
 
 **Stateless gateway does not mean stateless system.** Any healthy gateway should process the next request using a signed token or an appropriately shared session platform. Instance-local login sessions fail under ordinary balancing, instance restart, and regional failover. Persisted session dependencies must themselves meet regional recovery requirements.
+
+### Serving mode and data ownership are separate decisions
+
+**Active-active serving** means more than one region accepts production traffic. It does not automatically mean both regions may write the same financial state. An active-active application can still route all writes for an account to one authoritative owner. **Active-passive serving** means one region normally serves while another remains ready to take over. A **warm standby** keeps infrastructure, configuration, identity, certificates, dependencies, and replicated data ready enough to meet the intended recovery time.
 
 | Pattern | Use and consistency obligation |
 |---|---|
@@ -159,11 +184,15 @@ In the completed example, Canada is at **95% capacity**, US at **45%**, US adds 
 
 Active-passive simplifies the normal single-writer model but does not remove replication or correctness work. GLB consumes application/data readiness rather than performing synchronization itself. **RTO** measures recovery time; **RPO** measures tolerable data loss. No final RPO or replication-lag threshold was agreed.
 
+The five-minute scenario selected Canada as the normal write authority and the US as a warm standby because it avoids concurrent-write conflicts while meeting the stated recovery target. That decision is local to this scenario. A later sub-ten-second mutation may justify active-active serving or global proxying, but it still requires an explicit data-ownership model.
+
 **In-flight operations.** Reads generally support bounded retries. A payment may commit in Canada just before its response is lost; its outcome is indeterminate, not automatically failed. Reuse an idempotency key and consult authoritative operation status before replay. A service heartbeat cannot tell whether payment XYZ committed.
 
 **Production clarification.** Cross-region retry safety requires deduplication/status data and write-authority recovery to be safe in the destination region. Prevent split-brain writes during promotion and return; an idempotency header alone cannot guarantee this. Replication, fencing/promotion, session recovery, and global quota contracts remain implementation work.
 
 ## Scaling
+
+Capacity must be calculated for the failure state, not only the healthy state. Four gateways can carry 40,000 RPS when each is proven safe at 10,000 RPS, but that fleet has no headroom and cannot survive an instance or AZ loss at peak.
 
 | Fleet option | Failure result against 40,000 RPS peak |
 |---|---|
@@ -193,7 +222,9 @@ Load shedding must reduce work. An unbounded payment queue relocates overload an
 
 [Open the scalable diagram](assets/failover-flow.svg)
 
-**Failover sequence:** detect sustained failure → evaluate approved target health, capacity, identity/certificates and data readiness → apply routing policy → serve through the target regional LB and gateway fleet. DNS updates apply only to DNS steering; global proxies can change backend selection separately. Predetermined thresholds must bound the decision; do not wait indefinitely to discover every in-flight operation.
+Reliability is a sequence of bounded decisions rather than a single failover switch. The platform must distinguish an unhealthy gateway, an AZ loss, a regional outage, a slow dependency, and a control-plane failure because each requires different containment.
+
+**Regional failover sequence:** detect sustained failure → evaluate approved target health, capacity, identity/certificates and data readiness → apply routing policy → serve through the target regional LB and gateway fleet. DNS updates apply only to DNS steering; global proxies can change backend selection separately. Predetermined thresholds must bound the decision; do not wait indefinitely to discover every in-flight operation.
 
 | Failure | Containment and recovery |
 |---|---|
@@ -209,7 +240,21 @@ Load shedding must reduce work. An unbounded payment queue relocates overload an
 
 **Retry arithmetic correction.** The conversation used `3 × 3 × 3 = 27` as an amplification illustration. That assumes three total attempts at each layer. If each layer makes three retries *after* its initial attempt, the worst-case illustration is `4 × 4 × 4 = 64`. Specify attempts versus retries in the actual policy.
 
+### How the main failures unfold
+
+**Gateway or AZ failure.** Health checks remove failed gateway instances. Requests continue only if the surviving AZs have measured capacity for peak traffic plus the agreed reserve. Autoscaling restores capacity later; it does not replace pre-provisioned failure headroom.
+
+**Regional outage.** The traffic layer first stops adding work to Canada, then admits only eligible traffic into the US spare capacity. With Canada at 80,000 RPS, US at 120,000 RPS, and a US safe ceiling of 150,000 RPS, only 30,000 RPS fits before further reserve. Sending all traffic would create a second outage. Admission control preserves payment, login, and OTP capacity while lower-priority work is throttled, deferred, degraded, or rejected.
+
+**Slow but reachable dependency.** A successful health probe does not prove that authentication, databases, or payment dependencies meet latency and capacity requirements. End-to-end readiness, deadlines, bounded concurrency, circuit breakers, and backpressure prevent slow work from filling every gateway or service worker.
+
+**Unknown payment outcome.** Canada may commit a payment and lose the response during failure. A timeout means the outcome is unknown, not that the payment failed. The client reuses the same idempotency key; the destination consults authoritative operation status before replay. Generic service health cannot answer whether payment XYZ committed.
+
+**Retry storm.** Client, gateway, and service retries multiply. Assign one deliberate retry owner, one end-to-end deadline, bounded attempts, retryable-error rules, exponential backoff, jitter, and a retry budget. Circuit breakers stop attempts when a dependency is clearly unhealthy.
+
 ## Security
+
+Security is layered because the edge, gateway, and banking service protect different assets. Upstream DDoS protection preserves infrastructure capacity. The WAF filters malicious application traffic. The gateway verifies the caller and API-level permission. The banking service makes the final resource and business decision.
 
 | Control | Placement and boundary |
 |---|---|
@@ -223,6 +268,16 @@ Load shedding must reduce work. An unbounded payment queue relocates overload an
 
 For `POST /accounts/123/payments`, a token with `payments:create` does not authorize debiting someone else's account. Both gateway API permission and service resource authorization are required. Domain services understand the business operation, but need not know which gateway instance handled it.
 
+### Authentication and authorization in one payment request
+
+1. The gateway validates the token signature, issuer, audience, expiry, and general `payments:create` scope.
+2. Rate limits and tenant quotas decide whether the request may consume API capacity now.
+3. The gateway routes the valid request to the Payment Service.
+4. The service confirms that the customer owns or may operate account 123, that the account is eligible, and that business restrictions permit the debit.
+5. Service-to-service TLS or mTLS protects trusted internal or partner communication where required; it does not replace the authorization decision.
+
+This separation rejects invalid traffic early without moving account ownership, payment rules, fees, beneficiary eligibility, or fraud decisions into gateway configuration.
+
 ## Configuration Safety
 
 ![Safe configuration validation, canary, rollout and rollback flow](assets/config-safety.svg)
@@ -234,6 +289,14 @@ Schema validation checks structure, fields and types. Static validation checks r
 Routes, rate limits, auth rules, tenant quotas and certificate lifecycle are **defined centrally and applied regionally**. Runtime counters may live in regional/shared enforcement stores. Certificate material must be usable by each data plane. Distribution is the propagation mechanism; it is not the whole data plane.
 
 An hour-long control-plane outage should not stop traffic while the loaded policy, credentials and dependencies remain valid. Watch config age/version divergence, certificate expiry, delayed security changes, blocked tenant updates and changing regional saturation. Reconcile safely when management returns. **Production clarification:** cached configuration does not extend certificate/token validity, and the design must specify which preconfigured health/failover behaviors remain autonomous during a management outage.
+
+### Example: a route change during control-plane failure
+
+Suppose version 42 safely routes `/payments` to the Payment Service. Version 43 adds a new version route and passes schema validation, but the global control plane fails while the rollout is reaching Canada.
+
+Canada should not invent or fetch policy synchronously for each request. Gateways already running an approved version continue to serve with that locally available configuration. The rollout freezes, regions report their current versions, and operators assess whether any partial cohort must return to version 42. When the control plane recovers, it reconciles regions to the explicitly approved target rather than blindly resuming the interrupted rollout.
+
+Last-known-good configuration protects request availability, not unlimited staleness. Emergency revocation, expiring certificates, compromised credentials, and unsafe authorization policy require predefined security behavior even while normal management is unavailable.
 
 ## Observability
 
