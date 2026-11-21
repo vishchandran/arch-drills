@@ -36,30 +36,22 @@ The central ownership rule is: **the edge accelerates approved content; regional
 
 ## Problem & Requirements
 
-A customer opening the campaign page should download images, scripts and approved public information from a nearby delivery point. A customer opening an account balance needs a current, authorized response from the appropriate banking service. Both requests may arrive through the bank's internet-facing estate, but they have different correctness, privacy and recovery contracts.
-
-For the campaign example, four conditions must all hold:
-
-1. Public content remains fast without assuming that every request is a cache hit.
-2. Misses, refreshes, retries and failover traffic stay within the origin's safe capacity.
-3. Sensitive Canadian and UK banking data stays within the processing and storage boundaries approved for this scenario.
-4. A CDN, origin or regional failure has a rehearsed recovery path that meets the five-minute target without bypassing the first three conditions.
+A bank launches a campaign across Canada, the US, the UK and Ireland. Public traffic must stay fast without allowing cache misses or failover traffic to overwhelm the origin or the banking systems serving balances and payments.
 
 | Requirement | Decision and consequence |
 |---|---|
-| Fast public delivery across markets | Cache approved public content at suitable PoPs; measure user latency by geography and provider. |
-| Correct content and safe updates | Explicit keys, TTLs, validators, versioned assets and verified invalidation; cache behavior is a release contract. |
-| Protect sensitive banking APIs | Explicit cache bypass plus `Cache-Control: no-store`; authorization and financial correctness remain regional service responsibilities. |
-| Survive provider and origin failure | Multi-CDN where justified, independent origin failure domains, eligible failover destinations and rehearsed failback. |
-| Campaign elasticity | Prescale predictable demand; autoscale measured bottlenecks; cap misses, retries and background refresh. |
-| Canadian and UK residency | Enforce the scenario's approved boundaries at ingress, gateway, service, data, telemetry and operational access layers. |
-| Defense in depth | DDoS controls, WAF where TLS inspection is permitted, origin authentication, network restrictions and service authorization. |
-| Recovery within five minutes | Measure detection through useful service restoration under realistic load; 12 minutes fails the gate. |
-| Governed operations | Named owners, test evidence, runbooks, change control, privacy approval and formal ARB decisions. |
+| Fast public delivery | Cache approved public content close to users; measure by geography/provider. |
+| Safe origin load | Bound misses, refreshes and retries; prescale predictable demand. |
+| Sensitive APIs | Explicit cache bypass + `Cache-Control: no-store`; banking services retain authority. |
+| Provider/origin failure | Multi-CDN where justified, independent origin failure domains and tested survivor capacity. |
+| Residency | Enforce approved processing/storage boundaries end to end, not from IP geography alone. |
+| Security | DDoS/WAF where applicable, authenticated origins, restricted direct access and service authorization. |
+| Recovery | Restore useful service within **5 minutes**; the drill's **12-minute** result is a NO-GO. |
+| Operations | Named owners, runbooks, alerts, change control and evidence-based sign-off. |
 
-**Scope boundary.** This chapter covers delivery, caching, traffic steering, origin protection and operational governance. It does not redesign the bank's ledger, payment authorization or database recovery protocol. CDN recovery cannot establish the RPO of banking records; those systems need their own approved durability and reconciliation contracts.
+**Scope boundary.** This chapter covers delivery, caching, traffic steering, origin protection and operational governance. It does not redesign the ledger, payment authorization or database recovery protocol.
 
-**Inputs still requiring production validation.** Request mix, object sizes, geographic distribution, provider features, minimum hit ratio, safe origin rate, dependency limits, scaling time, purge convergence and alert thresholds must be measured. The 15,000-RPS safe origin rate is the drill's stated constraint. A production safe rate must be established at the required latency and error SLO, not inferred from CPU alone.
+**Still to validate in production:** request mix, object sizes, geography, provider features, safe origin rate, scaling time, purge convergence and alert thresholds.
 
 ## Final Architecture
 
@@ -107,121 +99,59 @@ These paths reconnect only at operational oversight: both need telemetry, rate b
 
 ## Edge & Routing Fundamentals
 
-Now that the two request paths are clear, the supporting edge and routing concepts can be read in context. These mechanisms help deliver or steer traffic; none of them replaces the banking services that own identity, authorization, residency, or financial correctness.
+A **CDN** serves approved content from distributed edge locations (**PoPs**) instead of repeatedly reaching the **origin**. A cache **hit** serves a stored response; a **miss** or revalidation consumes upstream capacity. An **origin shield** can consolidate misses from many PoPs but is itself another dependency.
 
-### CDN and edge fundamentals
+Edge compute is suitable for bounded delivery logic such as redirects or request normalization. It is not a reason to move authoritative balance/payment logic or unrestricted personal-data processing to arbitrary PoPs.
 
-A **Content Delivery Network (CDN)** is a distributed delivery layer between clients and origins. A **point of presence (PoP)** is a location containing edge infrastructure. An **edge cache** stores reusable HTTP representations near clients. The **origin** supplies the authoritative version of the content; it may be an object store, web server or application tier.
-
-A **cache hit** serves an eligible stored representation. A **miss** requires an upstream fetch. An expired representation may be **revalidated** rather than downloaded again. An **origin shield** is an intermediate cache that can consolidate fetches from many edge locations. It reduces duplicate upstream work but becomes another dependency that must be included in failure analysis.
-
-**Edge compute** runs bounded logic near the user: redirects, request normalization, lightweight public-content selection or access checks supported by the platform. It is not a reason to move authoritative balance calculations, payment execution or unapproved personal-data processing to arbitrary PoPs. A small function can still violate a data boundary or create a large cache-key explosion.
-
-A CDN is also not simply a database cache. It applies HTTP request, response, freshness and variation rules across clients, intermediary caches and origins. A fast response is useful only if it belongs to the right audience, is sufficiently current and is allowed to be served from that location.
-
-### DNS, Anycast and global load balancing
-
-These mechanisms act at different layers:
-
-| Mechanism | Working meaning and limitation |
+| Mechanism | Role / limitation |
 |---|---|
-| DNS | Resolves the bank's hostname, often through a CDN alias or traffic-steering service. Resolver caches and client behavior mean a DNS change does not instantly move every user. |
-| Anycast | Advertises the same IP prefix from multiple locations; network routing selects a reachable path. The selected PoP is not necessarily the geographically closest or the least loaded application endpoint. |
-| Global Load Balancing (GLB) | Chooses eligible providers or regions using policy, health, capacity and geography. It may operate through DNS or a proxy; the implementation determines convergence and failure behavior. |
-| Regional load balancing | Distributes admitted traffic among healthy instances within an approved regional boundary. It cannot make an unhealthy shared database disappear. |
-| TLS | Authenticates the server and encrypts a connection. Where TLS terminates determines where plaintext can be inspected or processed. |
+| DNS | Resolves hostnames and may steer to a CDN/provider; caches make changes non-instant. |
+| Anycast | Network routing reaches an advertised PoP; not necessarily the least-loaded application endpoint. |
+| GLB | Chooses eligible provider/region using health, policy, capacity and geography. |
+| Regional LB | Distributes admitted traffic inside an approved region. |
+| TLS | Encrypts/authenticates a connection; termination location determines where plaintext exists. |
 
-DNS can choose a CDN; that CDN can use Anycast to reach a PoP; the edge can then select an origin. These are separate decisions, not three names for the same routing operation. A GLB health result must be combined with residency eligibility and survivor capacity before it authorizes traffic movement.
+These layers compose: DNS may choose a CDN, Anycast reaches a PoP, and the edge then selects an origin. Health alone never overrides residency or survivor-capacity rules.
 
 ## Component Responsibilities
 
-| Component | Responsibility, purpose and boundary |
+| Component | Core responsibility / boundary |
 |---|---|
-| DNS / global steering | Selects eligible providers and destinations.<br>**Why:** Clients need reachable delivery endpoints.<br>**Boundary:** DNS geography and health are not account authorization or instant failover. |
-| CDN edge / PoP | Terminates approved connections, delivers eligible cached content and executes bounded edge policy.<br>**Why:** Reduce latency and repeated origin work.<br>**Boundary:** It is not the authority for a customer's balance or payment outcome. |
-| WAF / DDoS / bot controls | Filter malicious traffic and constrain abuse where inspection is possible.<br>**Why:** Protect service availability and reduce attack exposure.<br>**Boundary:** A WAF cannot inspect encrypted HTTP it cannot decrypt, or enforce every business rule. |
-| Cache policy and key rules | Define storage eligibility, variants, freshness and stale behavior.<br>**Why:** Reuse must preserve correctness.<br>**Boundary:** A high hit ratio never justifies cross-user leakage. |
-| Origin shield / request coalescing | Consolidate repeated upstream fetches and refreshes.<br>**Why:** Many PoPs can miss simultaneously.<br>**Boundary:** Shield failure and cold starts still need bounded origin admission. |
-| Origin admission / regional load balancer | Enforce safe aggregate rates, concurrency and priority allocation.<br>**Why:** Cache misses are real application load.<br>**Boundary:** Per-provider quotas must sum to a safe total. |
-| Public origin tier | Serves versioned public artifacts and approved public responses.<br>**Why:** Caches need an authoritative refill source.<br>**Boundary:** Replicas must not conceal common dependencies or serve unapproved versions. |
-| Regional gateway | Validates identity, account-region policy and API admission.<br>**Why:** Routing intent needs enforceable access control.<br>**Boundary:** It cannot substitute for service-level authorization. |
-| Banking services and data | Enforce account access, residency and financial semantics.<br>**Why:** Sensitive operations require authoritative controls.<br>**Boundary:** Edge retries and failover cannot override those controls. |
-| Configuration / certificates / purge control | Versions policy, rotates trust and coordinates provider changes.<br>**Why:** Multi-CDN behavior must remain consistent.<br>**Boundary:** An accepted API call is not evidence of global propagation. |
-| Telemetry / SRE / AI advisory | Measures customer outcomes, predicts pressure and supports operators.<br>**Why:** Provider health alone misses end-to-end failure.<br>**Boundary:** AI cannot become a synchronous or autonomous banking decision dependency. |
+| DNS / global steering | Select eligible providers/regions; not authorization and not instant failover. |
+| CDN edge / PoP | Serve approved cacheable content and bounded edge logic; never own financial truth. |
+| WAF / DDoS / bot controls | Reduce malicious/abusive traffic where inspection is possible. |
+| Cache policy / keys | Decide what may be stored, shared and considered fresh. |
+| Shield / coalescing | Consolidate duplicate upstream work; failure still needs bounded origin protection. |
+| Origin admission / LB | Enforce aggregate rate, concurrency and priority budgets. |
+| Public origin | Authoritative refill source for versioned public content. |
+| Regional gateway | Validate identity, region policy and API admission. |
+| Banking services/data | Enforce account authorization, residency and financial semantics. |
+| Config/cert/purge control | Version policy, trust and multi-provider changes. |
+| SRE / telemetry / AI advisory | Measure outcomes and support operators; AI stays advisory and asynchronous. |
 
 ## Data & Consistency
 
-The public origin owns the published representation. A cache owns a reusable copy under a time- and policy-bounded contract. Banking services own sensitive data and financial outcomes. Treating those three forms of ownership as interchangeable creates either stale business decisions or accidental disclosure.
+The **public origin** owns published content. The CDN owns only a reusable copy under a freshness/policy contract. Banking services own sensitive data and financial outcomes.
 
 ### Content classification comes before TTL
 
-| Content class | Storage and freshness policy |
+| Content | Policy |
 |---|---|
-| Fingerprinted public JavaScript, CSS and images | Long freshness lifetime with immutable URLs; publish a new URL when bytes change. Keep older referenced versions available during rollout and rollback. |
-| Public campaign HTML or product information | Explicit short freshness policy, validators and approved stale allowance where content risk permits. Locale, market and legal version may affect the key. |
-| Time-sensitive public notices or rates | Product owner defines freshness and stale tolerance. “Public” permits distribution; it does not mean stale content is harmless. |
-| Authenticated balances, payment initiation, payment status and sensitive account APIs | **Never cache.** Explicit route bypass, `no-store`, no stale fallback and no reuse across requests. |
-| Personalized pages, session or token responses | Non-cacheable by default in this design. Review redirects and failures as carefully as successful responses. |
+| Fingerprinted JS/CSS/images | Long-lived immutable URLs; publish new versions rather than mutating bytes. |
+| Public HTML/product content | Explicit short freshness, validators and approved stale allowance. |
+| Time-sensitive public notices/rates | Product-defined freshness; public does not mean stale is harmless. |
+| Balance/payment/account APIs | **Never cache**; bypass + `no-store`. |
+| Personalized/session/token responses | Non-cacheable by default. |
 
-Cache eligibility is an allowlist. Newly introduced APIs do not become cacheable merely because the CDN's default policy caches `GET` responses. A balance lookup may use `GET` and still be highly sensitive.
+### Cache keys and freshness
 
-### Cache keys: decide which requests may share a response
+A cache key is a promise that all mapped requests may safely share the same response. Include only representation-changing dimensions such as canonical path, approved locale/market and allowlisted query parameters. Dropping a real variation can leak/wrongly serve content; keeping arbitrary variation destroys cache reuse.
 
-A cache key is an equivalence claim: every request mapped to this key is allowed to receive the same representation. For a public campaign asset, an illustrative key is:
+`max-age`/`s-maxage` define freshness, `no-cache` requires revalidation, and `no-store` forbids storage. An ETag validates a version after freshness expires. TTL is not guaranteed residency because eviction can happen earlier.
 
-```text
-canonical host + normalized path + approved market/locale
-               + allowlisted representation-changing query parameters
-               + supported content-encoding variation
-```
+### Invalidation and publication
 
-Suppose `/campaign?lang=en&utm_source=mail` and `/campaign?lang=fr&utm_source=mail` return different text. Dropping `lang` can serve the wrong language. Retaining every random tracking parameter can destroy cache reuse. The policy must preserve meaningful variation while excluding only parameters proven irrelevant to the response.
-
-Do not normalize paths or query strings differently from the origin. If the edge thinks two requests are equivalent while the origin treats them differently, an attacker may poison the shared representation. Test duplicate parameters, encoded paths, case sensitivity, host headers, cookies and `Vary` behavior across both providers. The safe response to uncertain personalization is bypass, not a speculative universal key.
-
-For this banking design, adding customer IDs or authorization tokens to a cache key is not an alternative to the no-cache rule for sensitive APIs. It creates more sensitive storage and more ways to mis-key a response.
-
-### TTL, validators and storage directives
-
-**TTL** is a freshness lifetime, not a promise that an object remains physically resident. Eviction may happen sooner. `max-age` sets freshness for caches generally; `s-maxage` controls shared-cache freshness. `no-cache` permits storage but requires validation before reuse. `no-store` forbids storage. `private` excludes shared-cache storage but is insufficient by itself for this design's sensitive APIs. These distinctions follow [HTTP caching semantics in RFC 9111](https://www.rfc-editor.org/rfc/rfc9111.html).
-
-An **ETag** identifies a representation version. After freshness expires, a cache can send `If-None-Match` with the validator. A `304 Not Modified` response allows reuse of the stored body under updated metadata; a changed representation requires a new response body. Validation saves bytes, but it still reaches an upstream service and can consume connections, CPU or database work. A fleet of simultaneous validations can overload an origin even when transfer bandwidth stays modest.
-
-Illustrative public HTML policy, subject to product approval:
-
-```http
-Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=30, stale-if-error=600
-ETag: "campaign-2026-11-v3"
-```
-
-This example gives browsers a 60-second freshness lifetime and shared caches 300 seconds. The extensions permit bounded stale reuse during background validation or eligible errors, where implemented. They do not create a copy on a cold cache and must not override stricter content restrictions. See [RFC 5861](https://httpwg.org/specs/rfc5861.html) for the stale extensions. These numbers are illustrative, not drill-approved production settings.
-
-Illustrative versioned public asset:
-
-```http
-GET /assets/campaign.8d42c1.js
-Cache-Control: public, max-age=31536000, immutable
-```
-
-`immutable` means the representation will not change during its freshness lifetime; it is appropriate only when publication preserves that promise. A new build receives a new URL. See [RFC 8246](https://httpwg.org/specs/rfc8246.html).
-
-Sensitive API response policy:
-
-```http
-Cache-Control: no-store
-```
-
-Apply this together with explicit CDN bypass and checks at every intermediary. A response header cannot repair a configuration that overrides it or remove a sensitive copy previously cached by mistake. Such an event requires containment, purge verification and incident handling.
-
-### Invalidation, publication and convergence
-
-A **purge** removes or invalidates a stored entry. A **versioned URL** creates a new identity. Purging every object during a campaign turns cache capacity into synchronized origin demand; versioned assets make a normal deployment more predictable.
-
-Publish assets before publishing HTML that references them. Verify the new objects at each origin and CDN, warm a bounded set of hot public assets, then release the HTML. Retain previous assets for older pages, in-flight clients and rollback. Never overwrite an immutable URL with different bytes.
-
-For mutable public content, use targeted URL or tag invalidation, track a request identifier per provider and verify content versions from representative PoPs. Multi-CDN purge is not one atomic transaction. One provider may serve the new version while another serves the old version until propagation completes. Define the allowed convergence window and what to do if it is exceeded.
-
-Deleting or purging an edge entry does not recall a browser copy. Sensitive content therefore must not enter caches in the first place. Urgent legal or security removal may require disabling the route or serving a controlled error while global removal is verified; the ordinary stale policy must not keep prohibited content alive.
+Prefer versioned immutable assets. Publish new assets before HTML that references them. Use targeted purge for urgent withdrawal and verify convergence across both providers. A successful purge API response is not proof that every edge/browser stopped serving the old representation.
 
 ## Scaling
 
@@ -471,52 +401,40 @@ Evaluate forecasts through historical replay, shadow mode and measured lead time
 
 ## TPM Delivery
 
-**Technical Program Management (TPM)** organizes delivery around evidence of safe behavior across teams. **Site Reliability Engineering (SRE)** owns operational reliability with the service teams. Completing CDN configuration is only one dependency; origins, identity, privacy, capacity and operations must work together under failure.
-
-| Outcome-based workstream | Completion evidence |
+| Workstream | Delivery evidence |
 |---|---|
-| Cross-regional CDN | Provider configuration, routing eligibility, cache behavior, certificates, purge parity and tested provider failure. |
-| Cache engineering | Content classification, key tests, TTL/validator policy, publication ordering, invalidation and stale boundaries. |
-| GLB / network | Health semantics, traffic steering, DNS convergence, origin restrictions and controlled failback. |
-| Origin / replica | Independent failure-domain analysis, measured capacity, prescaling, downstream limits and survivor readiness. |
-| Gateway / banking services | Trusted identity-region mapping, service authorization, cache bypass and negative residency tests. |
-| Performance engineering | Peak and low-hit tests, cold-cache failover, p95/p99 latency, global admission and banking reserve. |
-| Integrated testing | End-to-end public and banking flows, security failures, configuration drift, deployment and recovery scenarios. |
-| Information Security | TLS, WAF, DDoS, origin trust, threat model, control-plane permissions and incident containment. |
-| Privacy / Compliance / Data Governance | Explicit approval of Canadian and UK processing/storage boundaries, telemetry, backups, support access and transfer policy. |
-| Operational readiness / SRE | Dashboards, alerts, runbooks, on-call, vendor escalation, recovery evidence and handover. |
+| CDN / cache | Provider parity, cache classification/keys/TTL, certificates and purge behavior. |
+| GLB / network | Health, steering, DNS convergence, origin restrictions and failback. |
+| Origin / capacity | Independent failure domains, prescaling, safe limits and survivor headroom. |
+| Gateway / banking | Trusted region mapping, authorization and cache bypass for sensitive APIs. |
+| Security / privacy | TLS/WAF/origin trust plus approved processing/storage boundaries. |
+| Performance / integration | Peak, low-hit, cold-cache, provider/origin failure and end-to-end banking tests. |
+| SRE / operations | SLOs, dashboards, alerts, runbooks, on-call and vendor escalation. |
 
 ### Sequence and critical path
 
-**Content and residency classification → routing/TLS/cache contracts → origin and regional enforcement → cross-provider integration → peak and cold-failover evidence → five-minute recovery evidence → security/privacy/operations sign-offs → controlled canary.**
-
-CDN, origin, gateway and observability teams can build in parallel once the contracts are stable. The integrated failure exercise drives readiness. Privacy review starts before choosing TLS termination and logging locations, because those decisions can invalidate the topology rather than merely add a late checklist item.
+**Content/residency classification → routing/TLS/cache contracts → origin/regional enforcement → cross-provider integration → peak/cold-failover testing → 5-minute recovery proof → security/privacy/operations sign-off.**
 
 ### Milestones and evidence
 
-1. **Architecture baseline:** Approved public/sensitive split, data boundaries, recovery target, origin budgets and decision records.
-2. **Integration-ready components:** Provider parity, certificates, authenticated origins, regional enforcement and observable request paths.
-3. **Correctness and security:** Cache-key isolation, no sensitive caching, direct-origin denial, wrong-region rejection and controlled publication.
-4. **Capacity and resilience:** Campaign arithmetic validated with representative tests, cold-cache origin protection, provider/origin failures and failback.
-5. **Operational acceptance:** Recovery within five minutes, actionable alerts, runbooks, on-call coverage and tested rollback.
-6. **Go/No-Go:** Dated evidence and accountable sign-off from workstream owners, including explicit privacy and compliance acceptance.
-
-Each milestone has entry and exit criteria, an owner, a due date and linked evidence. Track dependencies and unresolved decisions in the **Risks, Assumptions, Issues and Dependencies (RAID)** register. Verbal confidence or a green status slide cannot substitute for a failed recovery test.
+1. **Architecture baseline:** public/sensitive split, data boundaries, origin budget and recovery target.
+2. **Integration-ready:** provider parity, certificates, authenticated origins and regional enforcement.
+3. **Correctness/security:** no sensitive caching, cache-key isolation, direct-origin denial and wrong-region rejection.
+4. **Capacity/resilience:** campaign arithmetic, cold-cache protection, provider/origin failure and failback.
+5. **Operational acceptance:** 5-minute recovery, actionable alerts/runbooks and accountable sign-off.
 
 ## Program Risks
 
-| Risk / owner function | Mitigation → trigger → contingency |
+| Risk | Mitigation / decision boundary |
 |---|---|
-| Campaign miss load exceeds origin capacity / Performance + SRE | Prescale, cap aggregate demand and test low-hit scenarios → safe envelope threatened → shed optional work, activate approved fallback and pause campaign expansion. |
-| CDN diversity hides a common origin dependency / Architecture + Infrastructure | Map failure domains and test dependency loss → both providers fail together → repair origin resilience before claiming continuity. |
-| Residency policy is incomplete / Privacy + Gateway teams | Approve end-to-end data flows and negative tests → unapproved processing or uncertain routing → stop affected rollout and correct controls. |
-| Multi-CDN policy drift / CDN + Security | Versioned configuration, parity tests and audit → inconsistent cache/WAF/certificate behavior → hold traffic shift or revert affected policy. |
-| Sensitive response cached / Security + Application owners | Explicit bypass and cross-user tests → any sensitive cache hit → contain, purge, investigate and block expansion. |
-| Recovery remains above five minutes / Network + SRE | Phase timings, automated eligible failover and repeated rehearsal → 12-minute test → NO-GO, remediation and sponsor escalation. |
-| Secondary capacity or commercial limits unproven / Infrastructure + Vendor management | Validate quotas, surge commitments and support paths → cold failover saturates → provision capacity or revise release scope through governance. |
-| AI produces unsafe or stale advice / SRE + Model owner | Shadow evaluation, human review and deterministic validators → policy-conflicting proposal → reject recommendation; preserve existing controls. |
-
-Residual risks require an accountable owner and explicit acceptance. Mandatory security, residency and recovery gaps remain release blockers under the agreed requirements.
+| Origin overload from miss surge | Prescale, cap aggregate demand, reserve banking capacity and shed optional work. |
+| Multi-CDN hides shared dependency | Map/test origin, DNS, config and downstream failure domains before claiming resilience. |
+| Sensitive response cached | Explicit bypass + cross-user tests; any hit is containment + rollout stop. |
+| Residency drift | End-to-end approved mapping and negative tests; uncertain routing fails safely. |
+| Provider policy drift | Versioned config, parity checks and controlled rollback. |
+| Recovery exceeds 5 min | Measure phases, remediate and retest; 12 minutes remains NO-GO. |
+| Secondary capacity unproven | Validate surge quota/support path before relying on failover. |
+| Unsafe AI advice | Human review + deterministic validators; core controls continue without AI. |
 
 ## TPM Constraint Mutations
 
@@ -534,32 +452,26 @@ A formal change to the recovery requirement would require accountable business a
 
 ## Production Readiness
 
-Required gates, **not claims of passed production tests**. Every gate needs agreed criteria, evidence, an owner and sign-off.
+Required gates, **not claims of completed production tests**.
 
 | Gate | Evidence before Go |
 |---|---|
-| Functional / content | Public and sensitive route classification, locale/market behavior, redirects, errors and approved fallback content. |
-| Cache correctness | Key equivalence tests, query/header/cookie variation, poisoning/deception resistance, TTL/ETag behavior and no sensitive API caching. |
-| Publication / invalidation | Asset-first deployment, immutable version integrity, targeted multi-CDN purge, convergence measurement and prior-version rollback. |
-| Capacity | 100k/90% and 500k/70% scenarios, uncached API mix, cold caches, refresh/retry overhead, safe global admission and protected banking capacity. |
-| Provider / origin resilience | CDN loss, independent origin loss, shared-dependency failures, healthy survivor capacity and controlled failback. |
-| Regional enforcement | Trusted account mapping, wrong-region rejection at gateway and service, approved TLS processing, data stores, logs, backups and access. |
-| Recovery | Representative end-to-end failover restores useful service within **five minutes**, with timestamps and policy/capacity evidence. A 12-minute result fails. |
-| Security | WAF/DDoS behavior, direct-origin denial, origin authentication, certificate rotation, least privilege and control-plane audit. |
-| Operations / release | User-centered SLOs, alerts, runbooks, on-call and vendor escalation, approved change/rollback plans and formal sign-offs. |
-| AI, if enabled | Asynchronous-only integration, approved data inputs, evaluated forecasts, human-approved changes, deterministic guards and model-outage tests. |
-
-No unresolved sensitive cache exposure, unapproved regional processing, unsafe origin overload path or failed mandatory recovery gate. Functional completion is not production readiness.
+| Functional / cache | Public vs sensitive classification, key behavior, TTL/ETag and no sensitive caching. |
+| Publication | Versioned deploys, targeted purge and rollback compatibility. |
+| Capacity | Peak/low-hit/cold-cache scenarios with safe global admission and banking reserve. |
+| Resilience | CDN loss, origin loss, shared-dependency failure and healthy survivor capacity. |
+| Residency/security | Trusted region mapping, approved TLS processing, origin trust and least privilege. |
+| Recovery | End-to-end useful service restored within **5 minutes**. |
+| Operations | User-centered SLOs, alerts, runbooks, on-call/vendor escalation and rollback plan. |
+| AI, if enabled | Async-only, approved data inputs, evaluated forecasts and deterministic safeguards. |
 
 ## Rollout & Rollback
 
-Start with configuration comparison and synthetic traffic, then a small public-content cohort, a limited geographic/provider canary and progressive expansion. Introduce sensitive-path changes only after their independent security and residency gates pass. Freeze unrelated changes during the decisive recovery exercise so evidence can be attributed to a known configuration.
+Use **synthetic/config validation → small public-content canary → limited geography/provider → progressive expansion**. Sensitive-path changes proceed only after independent security/residency gates pass.
 
-Before each ramp, verify provider certificates, origin trust, policy parity, object versions, safe origin budgets and rollback readiness. Watch customer latency and success, miss RPS, origin concurrency, WAF false positives, regional rejects and configuration drift. Stop on a sensitive cache hit, unauthorized processing, origin-envelope breach or sustained service regression.
+Before each ramp, verify certificates, origin trust, policy parity, object versions, safe origin budget and rollback readiness. Stop on any sensitive cache hit, unapproved processing, origin-envelope breach or sustained regression.
 
-Rollback restores a known-good configuration or traffic split only when the destination remains healthy, compliant and sufficiently provisioned. Keep older versioned assets available; restore the corresponding HTML references. A DNS rollback also has convergence delay. Do not perform a global purge as a reflex, disable certificate verification or route banking data into an unapproved country.
-
-If rollback would reintroduce a security defect or exceed survivor capacity, use controlled degradation or failure instead. Recovery completes only after useful service and the required boundaries are verified, then incident evidence and runbooks are updated.
+Rollback restores a known-good configuration or traffic split only if the destination is healthy, compliant and provisioned. DNS rollback still has convergence delay. If rollback would reintroduce a security defect or overload a survivor, prefer controlled degradation/failure.
 
 ## Concepts Learned
 
