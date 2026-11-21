@@ -169,130 +169,64 @@ A timeout means **unknown outcome**, not “payment failed.” Retries reuse the
 
 ## Scaling
 
-Scaling a Scheduler is not only a question of how many rows it can scan. The system must find due work without creating a database hotspot, distribute ownership without losing ordering requirements and keep the dispatch rate inside the Transfer Service's safe capacity.
+Scale the Scheduler by separating **due discovery**, **dispatch**, and **financial execution**. The bottleneck may be the due index, claim rate, Kafka, worker fleet or Transfer Service; adding Scheduler nodes does not automatically increase end-to-end capacity.
 
-A single logical database is the simplest starting point, but schedule history, occurrence creation, claim updates, outbox writes and due-time queries all compete for storage, I/O and connections. **Database sharding** divides authoritative records across independent owners using a stable routing key such as tenant or customer. Each shard keeps its own due-time index and outbox. Sharding is justified by a measured ownership limit; it is not merely another way to add workers.
-
-**Worker partitioning** divides processing capacity. More workers can consume more Kafka partitions or scan more assigned time buckets, but they do not divide the database's stored ownership. Conversely, adding database shards does not guarantee enough Transfer Service capacity. The two scaling decisions solve different bottlenecks.
-
-### Capacity exercises that changed the reasoning
-
-| Exercise | Result and implication |
+| Area | Scaling rule |
 |---|---|
-| 20,000 executions become due each second; Transfer Service accepts 12,000/sec | **Backlog growth:** 8,000/sec, or **28.8 million/hour**<br>Adding Scheduler workers increases pressure unless downstream capacity changes. |
-| A 30-minute Kafka outage at 12,000 eligible executions/sec | **Accumulated intent:** 21.6 million executions<br>Recovery needs outbox storage, Kafka capacity and a paced drain plan. |
-| Recovery dispatches 18,000/sec while 12,000/sec of new work continues | **Net drain:** 6,000/sec<br>A 21.6 million backlog needs about **60 minutes** to drain, assuming the higher rate is safe and sustained. |
-| One customer contributes 40% of a shard's due rows | Fleet averages can look healthy while one shard is late<br>Use per-tenant fairness, quotas and a controlled routing-key migration. |
+| Due detection | Indexed `dueAt` ranges, bounded batches and shard-local scans. |
+| Sharding | Route by stable key; each shard retains its own due index and authority. |
+| Workers | Scale only within Kafka partition and Transfer Service capacity. |
+| Backlog | Measure oldest due age and catch-up rate, not queue size alone. |
+| Priority | Reserve lanes/capacity for critical payments rather than letting bulk work starve them. |
+| Hot shard | Rebalance/split ownership when measured skew justifies migration. |
 
-These are hypothetical exercises, not verified production measurements. Their purpose is to expose the capacity relationships that tests must prove.
-
-- **Due index and time buckets:** index `(state, dueAt)` or shard/time-bucket equivalents. Fetch small ordered batches and use a look-ahead window. Time buckets narrow the scan, but bucket boundaries must overlap safely so a polling pause cannot hide due work.
-- **Sharding:** route by stable customer/tenant key where ordering or per-customer controls matter. Each shard owns schedule, execution and outbox state together. Cross-shard business operations remain outside the Scheduler.
-- **Detector parallelism:** assign shard or bucket ranges through exclusive leases/consensus. Overlapping detection is acceptable when claims remain atomic; unbounded duplicate scans are not.
-- **Kafka partitions:** choose a key aligned with necessary ordering and distribute hot tenants using approved subkeys when strict total customer ordering is unnecessary.
-- **Hot customers:** per-tenant quotas, fair queues and split routing prevent one customer from monopolizing a shard. Moving a hot key requires versioned routing, dual-read or migration state, and single write authority.
-- **Connections and rebalancing:** size pools within a global database connection budget. Rebalancing a shard copies durable state, catches up changes and transfers one fenced write authority; it is a migration, not a routing-table edit.
-- **Backpressure:** bound in-flight calls and adjust dispatcher admission from Transfer Service latency, errors, quota and queue age. Polling more due rows does not create downstream capacity.
-- **Priority:** separate critical, standard and bulk lanes with reserved worker, database, Kafka and Transfer Service capacity. Labels in one FIFO do not isolate resources.
-
-During overload, preserve durable intent, admit at the safe global rate, reserve critical capacity, defer lower classes and expose projected drain time. Backlog drains only while sustainable completion exceeds new eligible arrivals.
-
-Global rate limiting cannot be a disconnected per-worker guess. Allocate regional/shard budgets from one capacity policy with conservative local fallback. Include new work, retries, replay and DR recovery in the same envelope. Prefer shedding new optional schedules at the API over accepting work that cannot meet its contract; never silently drop committed financial jobs.
-
-Priority determines how the safe budget is allocated. Critical time-bound payments receive reserved capacity. Standard scheduled transfers use the remaining committed lane. Routine recurrence and bulk administrative work can wait longer. Priority never bypasses authorization or ledger rules, and labels in one shared FIFO do not provide isolation; the worker, Kafka, database and Transfer Service budgets must support the separation.
+Capacity exercises in the drill showed that predictable 9:00 AM bursts should be **pre-scaled**, and recovery throughput must exceed incoming work or lateness never converges.
 
 ## Reliability & Failure Modes
 
-Failure handling begins with one Scheduler node and expands outward to Kafka, the Transfer Service, the database and an entire region. At every boundary, the design asks: **what failed, what durable state remains, how is failure detected, how does recovery proceed, and what financial uncertainty still needs reconciliation?**
-
-| Failure and durable evidence | Detection, recovery and correctness |
+| Failure | Safe response |
 |---|---|
-| API times out after the schedule commit; the schedule row remains durable | **Detect:** Client timeout plus API/database correlation.<br>**Recover:** Retry the same request idempotency key; return `S-501` and reject a mismatched payload. |
-| Due-job detector crashes; due rows remain indexed in the database | **Detect:** Missing heartbeat and scan-progress/lateness signals.<br>**Recover:** Another detector scans the same range. Atomic claims tolerate overlap; no financial call has occurred yet. |
-| Node A pauses after claim; lease and token 41 remain recorded | **Detect:** Lease renewal stops and `leaseUntil` passes.<br>**Recover:** Node B claims with token 42. Stale A is fenced; if A already emitted a command, execution-ID idempotency still protects the transfer. |
-| Worker crashes after Kafka receipt but before a financial commit | **Detect:** Consumer session/offset is lost; no Transfer record exists.<br>**Recover:** Kafka redelivers the same command and execution ID. The Transfer Service performs one effect. |
-| Transfer commits, but worker crashes or times out before recording the response | **Detect:** Scheduler sees timeout or missing outcome; Transfer/ledger retain `E-501-0900`.<br>**Recover:** Mark `Unknown`, reconcile by execution ID and reuse that ID on retry. Do not infer failure from silence. |
-| Scheduler commits an outbox row while Kafka is unavailable | **Detect:** Outbox age/depth rises and broker publish fails.<br>**Recover:** Retain intent, back off and publish after recovery. Pace the drain within Kafka and Transfer capacity. |
-| Kafka accepts a publish, but relay crashes before marking it published | **Detect:** Outbox row remains unpublished while Kafka contains the record.<br>**Recover:** Relay publishes again with the same IDs. Consumer and Transfer idempotency absorb the duplicate. |
-| Invalid command or permanent business rejection | **Detect:** Validation or Transfer response classifies the failure.<br>**Recover:** Record the terminal reason. Quarantine poison work; unchanged input is not retried indefinitely. |
-| Transient dependency error | **Detect:** Bounded error/latency thresholds and breaker signals.<br>**Recover:** Retry with backoff and jitter inside the global budget; reconcile any uncertain financial call first. |
-| Retry exhaustion | **Detect:** Attempt or elapsed-time limit is reached.<br>**Recover:** Move to an owned DLQ/exception queue. Repair and replay with the original identity; reconcile financial state. |
-| Scheduler outage creates a misfire backlog | **Detect:** Oldest-due age and missed-window counts rise.<br>**Recover:** Apply skip/coalesce/catch-up policy, then drain within safe Transfer capacity. Priority changes allocation, not capacity. |
-| Database leader fails; replicas retain committed quorum state | **Detect:** Consensus observes missed heartbeats and leader loss.<br>**Recover:** Elect an eligible current leader, advance the term and reroute. Uncommitted work is not treated as acknowledged. |
-| Two owners appear for one shard | **Detect:** Conflicting terms, token rejects or authority alarms.<br>**Recover:** Only the quorum-backed term continues. Fence the other owner and reconcile commands that may have escaped. |
-| Region fails; surviving quorum retains acknowledged scheduler state | **Detect:** Regional health, quorum and routing signals.<br>**Recover:** Promote affected shards, advance terms and pace backlog release. Transfer outcomes remain separately authoritative. |
-| Original region returns during failback | **Detect:** Replica catch-up and consistency checks complete.<br>**Recover:** Keep the recovery region authoritative until state matches, then transfer each shard with a new term and reconcile in-flight work. |
-| Cross-region quorum is lost | **Detect:** Majority cannot be formed.<br>**Recover:** Stop acknowledging writes and dispatch. Controlled unavailability is safer than split brain or a false RPO 0 claim. |
-
-Retry policy separates transient, permanent and unknown outcomes. Circuit breakers stop futile calls to an unhealthy Transfer Service; backpressure limits aggregate work; priority decides who receives scarce capacity. These controls solve different problems and all are required.
-
-**Controlled DLQ replay:** repair and verify the cause → select eligible executions → reconcile financial state → canary a small set with original IDs → verify ledger/outcomes/errors → ramp inside spare capacity → stop on mismatch, throttling or duplicate-effect signals. Resetting offsets or generating new IDs is not repair.
+| Scheduler dies before claim | Another node discovers and claims the still-due row. |
+| Scheduler pauses after claim | Lease expires; new owner receives a higher fencing token. |
+| DB commit succeeds, publish not completed | Outbox relay resumes from durable intent. |
+| Kafka redelivers | Worker reuses the same execution ID; Transfer/ledger returns prior result. |
+| Transfer call times out | Treat as unknown; reconcile before retrying. |
+| Transfer dependency is down | Backoff + jitter, bounded retries, priority protection and durable backlog. |
+| Poison execution | Quarantine to owned DLQ; preserve identity and audit history for governed replay. |
+| Region fails | Promote only valid fenced authority under the cross-region quorum policy. |
 
 ### Multi-region durability and recovery
 
-**Recovery Point Objective (RPO)** is the maximum accepted loss of committed data after recovery. RPO 0 means every acknowledged schedule, cancellation and execution transition needed for correctness must survive loss of either region. **Recovery Time Objective (RTO)** is the target time to restore useful service; here it is five minutes.
+The drill requires **RPO 0** for acknowledged scheduler state and **RTO 5 minutes**. That implies synchronous cross-region durability for the committed scheduling state, one authoritative region/shard owner at a time, fencing of the old authority, and tested failback.
 
-The accepted design commits through a cross-region **quorum**, the minimum voting majority required to acknowledge state and establish authority. A two-region topology needs an arrangement that prevents both isolated regions from forming separate majorities—commonly an odd voting set or a managed consensus system with a third failure domain. Two independent regional primaries are not a quorum.
-
-![Per-shard cross-region durability and recovery](assets/multi-region-dr.svg)
-
-[Open the scalable multi-region DR diagram](assets/multi-region-dr.svg)
-
-In the diagram, Region A owns shard 7 in term 81. If A fails, Region B may take ownership only after the surviving voters confirm the current committed log. Promotion advances the term to 82, which fences term 81. This prevents the isolated old region from resuming dispatch when its network returns.
-
-Synchronous commit protects acknowledged **scheduler state**: schedule definitions, occurrences, claims, cancellation state and outbox intent. It does not prove that an in-flight transfer completed. If the region disappears after the Transfer Service or ledger commits but before the Scheduler records the outcome, regional recovery still classifies that execution as unknown and reconciles by execution ID.
-
-| Control | Required design / evidence |
-|---|---|
-| RPO 0 | Synchronous quorum before acknowledgement; committed log and snapshots include schedules, executions, tokens, outbox and cancellation state. |
-| RTO 5 minutes | Pre-provisioned services, automated health/quorum decision, shard promotion, routing and backlog restart; measure useful processing, not merely DNS change. |
-| Per-shard authority | One leader/term at a time; routing carries the current epoch and clients reject stale metadata. |
-| Fencing | Promotion advances term/token; old-region dispatch and writes are rejected at database, relay and downstream boundaries. |
-| Kafka continuity | Replicate or recreate topics, offsets and producer/consumer identity without losing the database outbox as the recovery source. |
-| Failover | Confirm majority and current log, fence old authority, promote shard, route, canary and ramp inside Transfer capacity. |
-| Failback | Keep recovery region authoritative, rebuild and catch up original region, verify equality, transfer each shard deliberately, then canary/ramp. |
-| Degraded quorum | Prefer consistency: reject or queue unacknowledged requests at a controlled edge; do not lower durability silently. |
-
-Failover is per shard so healthy shards need not move. The surviving region must have enough database, Kafka, worker and Transfer Service headroom to carry its promoted load; successful election without survivor capacity does not restore useful service. Automation must also prevent mass promotion from releasing the whole backlog simultaneously.
-
-A five-minute RTO includes detection, decision, fencing, promotion, routing and resumption of useful processing. RPO 0 does not promise zero duplicate delivery, and neither objective is a claim of achieved production performance until a representative regional exercise measures it. Stable IDs and reconciliation handle repeated attempts during recovery.
+A minority partition must stop. Regional recovery is not complete when routing changes; it is complete when due detection, dispatch, idempotency, reconciliation and capacity are working under the new authority.
 
 ## Security
 
-The most important security boundary is the handoff to the Transfer Service. A valid Scheduler command proves that an approved schedule reached execution; it does not prove that the transfer is still allowed. The Transfer Service must reapply account status, limits, sanctions and other financial controls at execution time.
+Security follows the same ownership boundaries as the architecture:
 
-| Area | Control |
-|---|---|
-| API and ownership | Strong client/service identity, authorization by tenant/account, scoped idempotency keys and immutable audit. |
-| Payload | Store references and minimum execution data; keep credentials, full account data and unnecessary personal data out of Kafka and logs. |
-| Commands/events | Schema validation, authenticated producers, topic ACLs, integrity checks and controlled version compatibility. |
-| Database | Encryption, least privilege, separation of API/detector/relay roles, backup protection and audited administrative changes. |
-| Financial boundary | Transfer Service reauthorizes the operation; Scheduler identity never bypasses limits, sanctions, account state or ledger controls. |
-| Operations | Dual control for bulk cancellation/replay, bounded tools, dry-run/canary, approval evidence and immutable operator audit. |
-| Secrets | Managed secrets, workload identity, rotation and no credentials in schedule payloads. |
-| AI | Minimized/redacted inputs, approved models, no autonomous transfer decision, provenance and deterministic fallback. |
+- authenticate users/services and authorize schedule/account operations;
+- use TLS/mTLS and least-privilege credentials between services;
+- restrict who can create, modify, cancel or replay schedules;
+- protect Kafka topics, DB shards, DLQs and admin/replay paths separately;
+- encrypt sensitive payloads and redact logs;
+- audit schedule changes, claims, retries, overrides and operator actions.
+
+Internal network location is not authorization. Replay and operational tools are especially sensitive because they can trigger real financial work.
 
 ## Observability
 
-The Scheduler is authoritative for recorded schedule and dispatch workflow. The Transfer Service and ledger are authoritative for financial outcome. Correlate `scheduleId`, `executionId`, `eventId`, shard, claim token, Kafka partition/offset, transfer ID and ledger reference without logging sensitive payloads.
-
-| Signals | Meaning / response |
+| Signal | Why it matters |
 |---|---|
-| API success/error/latency and idempotency conflicts | Ingress health and unsafe client reuse. |
-| Due jobs, oldest due age and schedule-to-dispatch latency | Customer-visible scheduler timeliness; depth alone hides old work. |
-| Claim success/conflict, expired leases and stale-token rejects | Ownership health, slow workers or split-brain attempts. |
-| Outbox depth/age and publish latency | Database-to-Kafka handoff health. |
-| Kafka lag by priority/shard and rebalance rate | Dispatch backlog, skew and consumer stability. |
-| Transfer latency, quota, `429/5xx`, breaker and unknown outcomes | Downstream capacity and reconciliation demand. |
-| Retry/DLQ depth, growth and oldest age | Unresolved work and operational ownership. |
-| Misfire/cancellation-race counts | Time semantics and product-policy impact. |
-| Idempotency hit/conflict and reconciliation mismatch | Duplicate recovery behavior and financial correctness. |
-| Quorum health, commit latency, leader changes and stale terms | RPO exposure and authority safety. |
-| Failover phase and measured restoration time | RTO evidence per shard and region. |
+| Due-to-dispatch lateness p95/p99 | Customer timing outcome. |
+| Oldest due age / backlog / catch-up rate | Whether the system is converging. |
+| Claim conflicts / lease expiry / fencing rejects | Ownership instability. |
+| Outbox age / Kafka lag / worker errors | Dispatch-path health. |
+| Transfer latency / unknown outcomes / dedupe hits | Financial dependency and retry behavior. |
+| DLQ age / replay volume | Unresolved failures and operational debt. |
+| Cross-region replication / failover time | RPO/RTO exposure. |
 
-Define SLOs for create durability, dispatch lateness by priority, terminal financial outcome, reconciliation age and regional restoration. “Service is up” does not satisfy a schedule that is 20 minutes late. Dashboards separate **API / Scheduling / Dispatch / Financial Outcomes / Capacity / DR / Exceptions**; alerts have thresholds, sustained windows, named owners and runbooks.
-
-For `E-501-0900`, a trace should answer: when was the schedule accepted, when did it become due, who claimed it, which token was used, when did the outbox publish, which Kafka record was consumed, what did the Transfer Service record and which ledger reference proves the outcome? That chain supports both incident response and financial investigation without placing sensitive payment data in ordinary logs.
+Correlate `scheduleId` and `executionId` end to end. Healthy Scheduler CPU does not prove payments are on time or financially reconciled.
 
 ## Key Architecture Decisions
 
