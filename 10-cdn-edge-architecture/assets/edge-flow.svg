@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1220" viewBox="0 0 420 1220" role="img" aria-labelledby="title desc"><title id="title">Public delivery and banking authority</title><desc id="desc">Two separate paths: public content uses CDN caching and protected origins; sensitive banking APIs use approved regional TLS, gateways and services with no caching. Global steering is constrained by policy.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}</style></defs>
+<rect width="420" height="1220" rx="12" fill="#fff"/>
+<text class="t" x="210" y="30" font-size="17" font-weight="700">Public delivery and banking authority</text>
+<rect x="28" y="54" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="80" font-size="15" font-weight="700">Client → DNS / global steering</text>
+<text class="t" x="210.0" y="102" font-size="13" font-weight="400">Select an eligible provider or endpoint</text>
+<text class="t" x="210.0" y="122" font-size="13" font-weight="400">Health + capacity + regional policy</text>
+<path class="l" d="M210 140L210 166"/>
+<rect x="28" y="171" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="197" font-size="15" font-weight="700">Classify before processing</text>
+<text class="t" x="210.0" y="219" font-size="13" font-weight="400">Public content and sensitive APIs</text>
+<text class="t" x="210.0" y="239" font-size="13" font-weight="400">have different handling contracts</text>
+<text class="t" x="210" y="290" font-size="14" font-weight="700">PUBLIC CONTENT PATH</text>
+<rect x="28" y="308" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="334" font-size="15" font-weight="700">CDN edge / PoP</text>
+<text class="t" x="210.0" y="356" font-size="13" font-weight="400">Approved TLS termination + WAF</text>
+<text class="t" x="210.0" y="376" font-size="13" font-weight="400">Correct key + freshness policy</text>
+<path class="l" d="M210 394L210 420"/>
+<rect x="28" y="425" width="364" height="86" rx="9" fill="#f2edfb" stroke="#9982bd" stroke-width="1.5"/>
+<text class="t" x="210.0" y="451" font-size="15" font-weight="700">Eligible cache hit → client</text>
+<text class="t" x="210.0" y="473" font-size="13" font-weight="400">Miss or revalidation follows below</text>
+<text class="t" x="210.0" y="493" font-size="13" font-weight="400">Stale only within approved policy</text>
+<path class="l" d="M210 511L210 537"/>
+<rect x="28" y="542" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="568" font-size="15" font-weight="700">Shield + origin admission</text>
+<text class="t" x="210.0" y="590" font-size="13" font-weight="400">Coalesce fetches; cap aggregate load</text>
+<text class="t" x="210.0" y="610" font-size="13" font-weight="400">Include retries and refresh traffic</text>
+<path class="l" d="M210 628L210 654"/>
+<rect x="28" y="659" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="685" font-size="15" font-weight="700">Resilient public origin tier</text>
+<text class="t" x="210.0" y="707" font-size="13" font-weight="400">Independent failure domains</text>
+<text class="t" x="210.0" y="727" font-size="13" font-weight="400">Versioned assets + tested capacity</text>
+<text class="t" x="210" y="782" font-size="14" font-weight="700">SENSITIVE BANKING PATH — NO CACHE</text>
+<rect x="28" y="800" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="826" font-size="15" font-weight="700">Approved regional TLS endpoint</text>
+<text class="t" x="210.0" y="848" font-size="13" font-weight="400">Regional processing or verified passthrough</text>
+<text class="t" x="210.0" y="868" font-size="13" font-weight="400">Do not assume every CDN supports it</text>
+<path class="l" d="M210 886L210 912"/>
+<rect x="28" y="917" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="943" font-size="15" font-weight="700">Regional gateway</text>
+<text class="t" x="210.0" y="965" font-size="13" font-weight="400">Trusted identity → account-region policy</text>
+<text class="t" x="210.0" y="985" font-size="13" font-weight="400">Explicit bypass + no-store</text>
+<path class="l" d="M210 1003L210 1029"/>
+<rect x="28" y="1034" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="1060" font-size="15" font-weight="700">Banking services + approved data</text>
+<text class="t" x="210.0" y="1082" font-size="13" font-weight="400">Recheck authorization and region</text>
+<text class="t" x="210.0" y="1102" font-size="13" font-weight="400">Own balances and payment outcomes</text>
+<text class="t" x="210" y="1157" font-size="13" font-weight="400">Paths are logical policies, not automatic failover.</text>
+<text class="t" x="210" y="1180" font-size="13" font-weight="400">No sensitive fallback to a public cache.</text>
+</svg>

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1000" viewBox="0 0 420 1000" role="img" aria-labelledby="title desc"><title id="title">Misses determine origin pressure</title><desc id="desc">Baseline 100 thousand RPS at 90 percent hit ratio produces 10 thousand origin RPS. Campaign 500 thousand at 70 percent produces 150 thousand, ten times the safe 15 thousand capacity. Controls must keep admitted work within the safe envelope.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}</style></defs>
+<rect width="420" height="1000" rx="12" fill="#fff"/>
+<text class="t" x="210" y="30" font-size="17" font-weight="700">Misses determine origin pressure</text>
+<rect x="28" y="54" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="80" font-size="15" font-weight="700">BASELINE</text>
+<text class="t" x="210.0" y="102" font-size="13" font-weight="400">100,000 incoming RPS</text>
+<text class="t" x="210.0" y="122" font-size="13" font-weight="400">90% hits → 10% misses</text>
+<path class="l" d="M210 140L210 166"/>
+<rect x="28" y="171" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="197" font-size="15" font-weight="700">10,000 origin RPS</text>
+<text class="t" x="210.0" y="219" font-size="13" font-weight="400">Below the stated 15,000-RPS ceiling</text>
+<text class="t" x="210.0" y="239" font-size="13" font-weight="400">5,000 RPS before additional overhead</text>
+<text class="t" x="210" y="291" font-size="14" font-weight="700">CAMPAIGN: TWO MULTIPLIERS</text>
+<rect x="28" y="309" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="335" font-size="15" font-weight="700">500,000 incoming RPS</text>
+<text class="t" x="210.0" y="357" font-size="13" font-weight="400">5× baseline traffic</text>
+<text class="t" x="210.0" y="377" font-size="13" font-weight="400">70% hits → 3× baseline miss fraction</text>
+<path class="l" d="M210 395L210 421"/>
+<rect x="28" y="426" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="452" font-size="15" font-weight="700">150,000 offered origin RPS</text>
+<text class="t" x="210.0" y="474" font-size="13" font-weight="400">15× baseline origin demand</text>
+<text class="t" x="210.0" y="494" font-size="13" font-weight="400">10× the safe 15,000-RPS ceiling</text>
+<path class="l" d="M210 512L210 538"/>
+<rect x="28" y="543" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="569" font-size="15" font-weight="700">Deterministic protection</text>
+<text class="t" x="210.0" y="591" font-size="13" font-weight="400">Global admission + concurrency limits</text>
+<text class="t" x="210.0" y="611" font-size="13" font-weight="400">Preserve banking capacity; bound retries</text>
+<path class="l" d="M210 629L210 655"/>
+<rect x="28" y="660" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="686" font-size="15" font-weight="700">Reduce work + prepare capacity</text>
+<text class="t" x="210.0" y="708" font-size="13" font-weight="400">Approved stale public content or redirect</text>
+<text class="t" x="210.0" y="728" font-size="13" font-weight="400">Prescale dependencies; warm gradually</text>
+<rect x="28" y="772" width="364" height="86" rx="9" fill="#f2edfb" stroke="#9982bd" stroke-width="1.5"/>
+<text class="t" x="210.0" y="798" font-size="15" font-weight="700">Arithmetic boundary ≠ operating target</text>
+<text class="t" x="210.0" y="820" font-size="13" font-weight="400">At 500k RPS, 97% hits gives 15k misses</text>
+<text class="t" x="210.0" y="840" font-size="13" font-weight="400">That leaves no margin for extra work</text>
+<text class="t" x="210" y="902" font-size="13" font-weight="400">Mixed workload: add uncached APIs and refresh.</text>
+<text class="t" x="210" y="925" font-size="13" font-weight="400">Do not double-count them in an aggregate ratio.</text>
+<text class="t" x="210" y="962" font-size="13" font-weight="400">Illustrative drill figures, not benchmark results.</text>
+</svg>

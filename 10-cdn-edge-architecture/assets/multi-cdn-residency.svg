@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1180" viewBox="0 0 420 1180" role="img" aria-labelledby="title desc"><title id="title">Diversity with regional boundaries</title><desc id="desc">CDN A and CDN B can use a resilient public origin tier; dedicated origins per CDN are optional. Sensitive Canadian and UK gateways each enforce independent local service and data boundaries. No automatic cross-country failover is allowed in this scenario.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}</style></defs>
+<rect width="420" height="1180" rx="12" fill="#fff"/>
+<text class="t" x="210" y="30" font-size="17" font-weight="700">Diversity with regional boundaries</text>
+<text class="t" x="210" y="67" font-size="14" font-weight="700">PUBLIC DELIVERY — WHERE PERMITTED</text>
+<rect x="28" y="86" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="112" font-size="15" font-weight="700">DNS / global steering</text>
+<text class="t" x="210.0" y="134" font-size="13" font-weight="400">Choose healthy, eligible provider</text>
+<text class="t" x="210.0" y="154" font-size="13" font-weight="400">Verify policy and survivor capacity</text>
+<path class="l" d="M210 172L113 205"/>
+<path class="l" d="M210 172L307 205"/>
+<rect x="28" y="210" width="170" height="66" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="113.0" y="236" font-size="15" font-weight="700">CDN A</text>
+<text class="t" x="113.0" y="258" font-size="13" font-weight="400">Cache + security</text>
+<rect x="222" y="210" width="170" height="66" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="307.0" y="236" font-size="15" font-weight="700">CDN B</text>
+<text class="t" x="307.0" y="258" font-size="13" font-weight="400">Cache + security</text>
+<path class="l" d="M113 276L210 310"/>
+<path class="l" d="M307 276L210 310"/>
+<rect x="28" y="315" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="341" font-size="15" font-weight="700">Protected resilient origin tier</text>
+<text class="t" x="210.0" y="363" font-size="13" font-weight="400">Independent deployment / failure domains</text>
+<text class="t" x="210.0" y="383" font-size="13" font-weight="400">Shared tier or dedicated origins per CDN</text>
+<rect x="28" y="420" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="446" font-size="15" font-weight="700">Inspect common dependencies</text>
+<text class="t" x="210.0" y="468" font-size="13" font-weight="400">DNS • network • identity • database</text>
+<text class="t" x="210.0" y="488" font-size="13" font-weight="400">Secrets • control plane • deployments</text>
+<text class="t" x="210" y="550" font-size="14" font-weight="700">SENSITIVE APIs — APPROVED ENTRY ONLY</text>
+<rect x="28" y="570" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="596" font-size="15" font-weight="700">Canadian boundary</text>
+<text class="t" x="210.0" y="618" font-size="13" font-weight="400">Approved TLS → Canadian gateway</text>
+<text class="t" x="210.0" y="638" font-size="13" font-weight="400">Service rechecks identity and region</text>
+<path class="l" d="M210 656L210 682"/>
+<rect x="28" y="687" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="713" font-size="15" font-weight="700">Canadian services + data</text>
+<text class="t" x="210.0" y="735" font-size="13" font-weight="400">Independent local recovery domains</text>
+<text class="t" x="210.0" y="755" font-size="13" font-weight="400">No automatic fallback to the US</text>
+<rect x="28" y="800" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="826" font-size="15" font-weight="700">UK boundary</text>
+<text class="t" x="210.0" y="848" font-size="13" font-weight="400">Approved TLS → UK gateway</text>
+<text class="t" x="210.0" y="868" font-size="13" font-weight="400">Service rechecks identity and region</text>
+<path class="l" d="M210 886L210 912"/>
+<rect x="28" y="917" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="943" font-size="15" font-weight="700">UK services + data</text>
+<text class="t" x="210.0" y="965" font-size="13" font-weight="400">Independent local recovery domains</text>
+<text class="t" x="210.0" y="985" font-size="13" font-weight="400">No automatic fallback to Ireland</text>
+<text class="t" x="210" y="1043" font-size="13" font-weight="400">Logs, backups and access follow approved policy.</text>
+<text class="t" x="210" y="1068" font-size="13" font-weight="400">Client location does not determine account region.</text>
+<rect x="28" y="1090" width="364" height="66" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="1116" font-size="15" font-weight="700">Fail safely if no eligible destination</text>
+<text class="t" x="210.0" y="1138" font-size="13" font-weight="400">Do not exchange residency for availability</text>
+</svg>

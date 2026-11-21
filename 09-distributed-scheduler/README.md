@@ -530,4 +530,4 @@ Rollback stops new admissions/dispatch for the affected cohort, preserves schedu
 
 ---
 
-**Design basis:** 44 completed questions across 11 stages, accepted/refined/challenged/rejected proposals, constraint mutations, AI boundaries and Staff TPM delivery. Previous: [Topic 8 — Notification System Architecture](../08-notification-system/README.md). Next: Topic 10 — CDN + Edge Architecture (planned).
+**Design basis:** 44 completed questions across 11 stages, accepted/refined/challenged/rejected proposals, constraint mutations, AI boundaries and Staff TPM delivery. Previous: [Topic 8 — Notification System Architecture](../08-notification-system/README.md). Next: [Topic 10 — CDN + Edge Architecture](../10-cdn-edge-architecture/README.md).

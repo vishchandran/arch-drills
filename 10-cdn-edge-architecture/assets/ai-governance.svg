@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1115" viewBox="0 0 420 1115" role="img" aria-labelledby="title desc"><title id="title">AI advises; deterministic guards act</title><desc id="desc">Asynchronous telemetry feeds forecasts and human-reviewed recommendations. Approved changes pass deterministic validation and a canary. The synchronous banking path has no AI dependency; emergency guards act without waiting for a human or model.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#49647a"/></marker><style>.t{font-family:Arial,sans-serif;fill:#18364b;text-anchor:middle}.l{fill:none;stroke:#49647a;stroke-width:2;marker-end:url(#arrow)}</style></defs>
+<rect width="420" height="1115" rx="12" fill="#fff"/>
+<text class="t" x="210" y="30" font-size="17" font-weight="700">AI advises; deterministic guards act</text>
+<rect x="28" y="54" width="364" height="86" rx="9" fill="#edf5fb" stroke="#8aaac2" stroke-width="1.5"/>
+<text class="t" x="210.0" y="80" font-size="15" font-weight="700">Minimized operational telemetry</text>
+<text class="t" x="210.0" y="102" font-size="13" font-weight="400">Traffic • misses • origin utilization</text>
+<text class="t" x="210.0" y="122" font-size="13" font-weight="400">Approved processing and retention</text>
+<path class="l" d="M210 140L210 166" stroke-dasharray="5 4"/>
+<rect x="28" y="171" width="364" height="86" rx="9" fill="#f2edfb" stroke="#9982bd" stroke-width="1.5"/>
+<text class="t" x="210.0" y="197" font-size="15" font-weight="700">Asynchronous forecast</text>
+<text class="t" x="210.0" y="219" font-size="13" font-weight="400">Example: overload predicted in 30 minutes</text>
+<text class="t" x="210.0" y="239" font-size="13" font-weight="400">Confidence, evidence and expiry</text>
+<path class="l" d="M210 257L210 283" stroke-dasharray="5 4"/>
+<rect x="28" y="288" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="314" font-size="15" font-weight="700">Recommendation → human review</text>
+<text class="t" x="210.0" y="336" font-size="13" font-weight="400">SRE evaluates prescale or policy change</text>
+<text class="t" x="210.0" y="356" font-size="13" font-weight="400">No autonomous model-driven routing</text>
+<path class="l" d="M210 374L210 400"/>
+<rect x="28" y="405" width="364" height="86" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="431" font-size="15" font-weight="700">Deterministic change validation</text>
+<text class="t" x="210.0" y="453" font-size="13" font-weight="400">Residency • capacity • approval scope</text>
+<text class="t" x="210.0" y="473" font-size="13" font-weight="400">Version checks + rollback conditions</text>
+<path class="l" d="M210 491L210 517"/>
+<rect x="28" y="522" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="548" font-size="15" font-weight="700">Canary → observe → controlled ramp</text>
+<text class="t" x="210.0" y="570" font-size="13" font-weight="400">Audit model, approver and policy version</text>
+<text class="t" x="210.0" y="590" font-size="13" font-weight="400">Stop or rollback on measured regression</text>
+<text class="t" x="210" y="651" font-size="14" font-weight="700">ALWAYS-ON PROTECTION — NO AI WAIT</text>
+<rect x="28" y="670" width="364" height="106" rx="9" fill="#fff5df" stroke="#c8a85a" stroke-width="1.5"/>
+<text class="t" x="210.0" y="696" font-size="15" font-weight="700">Preapproved deterministic safeguards</text>
+<text class="t" x="210.0" y="718" font-size="13" font-weight="400">Origin rate and concurrency caps</text>
+<text class="t" x="210.0" y="738" font-size="13" font-weight="400">Circuit breakers + load shedding</text>
+<text class="t" x="210.0" y="758" font-size="13" font-weight="400">Regional restrictions always enforced</text>
+<text class="t" x="210" y="817" font-size="14" font-weight="700">SYNCHRONOUS BANKING PATH</text>
+<rect x="28" y="836" width="364" height="86" rx="9" fill="#e8f7f1" stroke="#72aa93" stroke-width="1.5"/>
+<text class="t" x="210.0" y="862" font-size="15" font-weight="700">Gateway → banking service → data</text>
+<text class="t" x="210.0" y="884" font-size="13" font-weight="400">Authentication and authorization</text>
+<text class="t" x="210.0" y="904" font-size="13" font-weight="400">No model call; no cached balance</text>
+<rect x="28" y="964" width="364" height="86" rx="9" fill="#f2edfb" stroke="#9982bd" stroke-width="1.5"/>
+<text class="t" x="210.0" y="990" font-size="15" font-weight="700">Model unavailable or unreliable?</text>
+<text class="t" x="210.0" y="1012" font-size="13" font-weight="400">Discard advice; core service continues</text>
+<text class="t" x="210.0" y="1032" font-size="13" font-weight="400">Guards remain active without approval delay</text>
+<text class="t" x="210" y="1082" font-size="13" font-weight="400">Dashed arrows: asynchronous advisory input.</text>
+</svg>
