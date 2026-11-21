@@ -6,7 +6,7 @@
 
 At 9:00 AM, a bank launches a campaign across Canada, the US, the UK and Ireland. Traffic grows from **100,000 requests per second at a 90% cache hit ratio** to **500,000 requests per second at a 70% hit ratio**. The public website still appears to be working at many edge locations, but origin demand has risen from **10,000 to 150,000 requests per second**. The origin's safe limit is **15,000**. At the same time, customers need to check balances and make payments. Serving the campaign must not exhaust the systems that serve their accounts.
 
-This chapter designs the CDN and edge architecture that contains that failure. The public-content path is **DNS / global traffic steering → selected CDN edge → security and cache policy → cache hit or protected origin fetch**. Sensitive banking traffic follows a separately governed path to an **approved regional TLS endpoint → regional gateway → banking services and data**. Multi-CDN delivery removes some provider dependencies; resilient origins, measured capacity and regional enforcement complete the design.
+This chapter designs the CDN and edge architecture that contains that failure. Start with two distinct paths: **public content is accelerated at the edge**, while **sensitive balance and payment requests remain on an approved regional banking path**. The architecture first shows those paths end to end; CDN, PoP, Anycast, DNS and GLB mechanics are introduced afterward, once the reader can see what problem each mechanism solves.
 
 The central ownership rule is: **the edge accelerates approved content; regional banking services retain authority over identity, data access and financial outcomes.** Never cache sensitive balance or payment APIs. Never relax residency boundaries to rescue availability. Keep AI outside the synchronous banking path. The drill's recovery target is **five minutes**; a measured **12-minute failover is a NO-GO**. Numerical scenarios are teaching exercises, not production benchmarks or evidence of a successful launch.
 
@@ -15,6 +15,7 @@ The central ownership rule is: **the edge accelerates approved content; regional
 - [Problem & Requirements](#problem--requirements)
 - [Final Architecture](#final-architecture)
 - [End-to-End Flow](#end-to-end-flow)
+- [Edge & Routing Fundamentals](#edge--routing-fundamentals)
 - [Component Responsibilities](#component-responsibilities)
 - [Data & Consistency](#data--consistency)
 - [Scaling](#scaling)
@@ -43,30 +44,6 @@ For the campaign example, four conditions must all hold:
 2. Misses, refreshes, retries and failover traffic stay within the origin's safe capacity.
 3. Sensitive Canadian and UK banking data stays within the processing and storage boundaries approved for this scenario.
 4. A CDN, origin or regional failure has a rehearsed recovery path that meets the five-minute target without bypassing the first three conditions.
-
-### CDN and edge fundamentals
-
-A **Content Delivery Network (CDN)** is a distributed delivery layer between clients and origins. A **point of presence (PoP)** is a location containing edge infrastructure. An **edge cache** stores reusable HTTP representations near clients. The **origin** supplies the authoritative version of the content; it may be an object store, web server or application tier.
-
-A **cache hit** serves an eligible stored representation. A **miss** requires an upstream fetch. An expired representation may be **revalidated** rather than downloaded again. An **origin shield** is an intermediate cache that can consolidate fetches from many edge locations. It reduces duplicate upstream work but becomes another dependency that must be included in failure analysis.
-
-**Edge compute** runs bounded logic near the user: redirects, request normalization, lightweight public-content selection or access checks supported by the platform. It is not a reason to move authoritative balance calculations, payment execution or unapproved personal-data processing to arbitrary PoPs. A small function can still violate a data boundary or create a large cache-key explosion.
-
-A CDN is also not simply a database cache. It applies HTTP request, response, freshness and variation rules across clients, intermediary caches and origins. A fast response is useful only if it belongs to the right audience, is sufficiently current and is allowed to be served from that location.
-
-### DNS, Anycast and global load balancing
-
-These mechanisms act at different layers:
-
-| Mechanism | Working meaning and limitation |
-|---|---|
-| DNS | Resolves the bank's hostname, often through a CDN alias or traffic-steering service. Resolver caches and client behavior mean a DNS change does not instantly move every user. |
-| Anycast | Advertises the same IP prefix from multiple locations; network routing selects a reachable path. The selected PoP is not necessarily the geographically closest or the least loaded application endpoint. |
-| Global Load Balancing (GLB) | Chooses eligible providers or regions using policy, health, capacity and geography. It may operate through DNS or a proxy; the implementation determines convergence and failure behavior. |
-| Regional load balancing | Distributes admitted traffic among healthy instances within an approved regional boundary. It cannot make an unhealthy shared database disappear. |
-| TLS | Authenticates the server and encrypts a connection. Where TLS terminates determines where plaintext can be inspected or processed. |
-
-DNS can choose a CDN; that CDN can use Anycast to reach a PoP; the edge can then select an origin. These are separate decisions, not three names for the same routing operation. A GLB health result must be combined with residency eligibility and survivor capacity before it authorizes traffic movement.
 
 | Requirement | Decision and consequence |
 |---|---|
@@ -127,6 +104,34 @@ A one-to-one mapping between CDN providers and origins is an option, not a requi
 6. If no compliant, sufficiently provisioned destination is available, return a controlled failure. Do not redirect a sensitive request to another country or fabricate a cached balance to make the site look available.
 
 These paths reconnect only at operational oversight: both need telemetry, rate budgets, release governance and incident ownership. Their caching and data-processing permissions remain distinct.
+
+## Edge & Routing Fundamentals
+
+Now that the two request paths are clear, the supporting edge and routing concepts can be read in context. These mechanisms help deliver or steer traffic; none of them replaces the banking services that own identity, authorization, residency, or financial correctness.
+
+### CDN and edge fundamentals
+
+A **Content Delivery Network (CDN)** is a distributed delivery layer between clients and origins. A **point of presence (PoP)** is a location containing edge infrastructure. An **edge cache** stores reusable HTTP representations near clients. The **origin** supplies the authoritative version of the content; it may be an object store, web server or application tier.
+
+A **cache hit** serves an eligible stored representation. A **miss** requires an upstream fetch. An expired representation may be **revalidated** rather than downloaded again. An **origin shield** is an intermediate cache that can consolidate fetches from many edge locations. It reduces duplicate upstream work but becomes another dependency that must be included in failure analysis.
+
+**Edge compute** runs bounded logic near the user: redirects, request normalization, lightweight public-content selection or access checks supported by the platform. It is not a reason to move authoritative balance calculations, payment execution or unapproved personal-data processing to arbitrary PoPs. A small function can still violate a data boundary or create a large cache-key explosion.
+
+A CDN is also not simply a database cache. It applies HTTP request, response, freshness and variation rules across clients, intermediary caches and origins. A fast response is useful only if it belongs to the right audience, is sufficiently current and is allowed to be served from that location.
+
+### DNS, Anycast and global load balancing
+
+These mechanisms act at different layers:
+
+| Mechanism | Working meaning and limitation |
+|---|---|
+| DNS | Resolves the bank's hostname, often through a CDN alias or traffic-steering service. Resolver caches and client behavior mean a DNS change does not instantly move every user. |
+| Anycast | Advertises the same IP prefix from multiple locations; network routing selects a reachable path. The selected PoP is not necessarily the geographically closest or the least loaded application endpoint. |
+| Global Load Balancing (GLB) | Chooses eligible providers or regions using policy, health, capacity and geography. It may operate through DNS or a proxy; the implementation determines convergence and failure behavior. |
+| Regional load balancing | Distributes admitted traffic among healthy instances within an approved regional boundary. It cannot make an unhealthy shared database disappear. |
+| TLS | Authenticates the server and encrypts a connection. Where TLS terminates determines where plaintext can be inspected or processed. |
+
+DNS can choose a CDN; that CDN can use Anycast to reach a PoP; the edge can then select an origin. These are separate decisions, not three names for the same routing operation. A GLB health result must be combined with residency eligibility and survivor capacity before it authorizes traffic movement.
 
 ## Component Responsibilities
 
