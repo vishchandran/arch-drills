@@ -155,182 +155,61 @@ Prefer versioned immutable assets. Publish new assets before HTML that reference
 
 ## Scaling
 
-The CDN absorbs reusable requests. The origin must survive everything else. Capacity planning starts with misses and uncached traffic, then adds revalidation, retries, refresh, warm-up and failover. Edge throughput is not evidence of origin safety.
+The key equation is **origin RPS = total RPS × miss ratio** before retries/refresh overhead.
 
-### Capacity exercises that changed the reasoning
+At 100k RPS with 90% hits, the origin sees about **10k RPS**. At 500k RPS with 70% hits, it sees **150k RPS**—10× the drill's 15k safe origin limit.
 
-For the drill's simplified aggregate request mix:
-
-```text
-Origin RPS = incoming RPS × (1 − request hit ratio)
-
-Baseline: 100,000 × (1 − 0.90) = 10,000 origin RPS
-Campaign: 500,000 × (1 − 0.70) = 150,000 origin RPS
-Safe origin ceiling: 15,000 RPS
-Campaign overload: 150,000 / 15,000 = 10× safe capacity
-```
-
-| Scenario | Result and implication |
+| Pressure | Response |
 |---|---|
-| 100k RPS, 90% hits | 10k origin RPS; 5k RPS remains below the stated ceiling, before extra overhead. |
-| 500k RPS, 90% hits | 50k origin RPS; preserving the original hit ratio still exceeds safe capacity. |
-| 500k RPS, 70% hits | 150k origin RPS; 135k RPS above the safe ceiling. The origin sees 15× its baseline demand. |
-| 500k RPS against 15k capacity | Required hit ratio is at least `1 − 15k/500k = 97%`, ignoring all overhead. This is an arithmetic boundary, not a safe operating target. |
-| 70% hits with a 15k origin limit | At most `15k/0.30 = 50k` total RPS is supportable under this simplified mix without additional measures. |
-| Cold survivor cache at 500k RPS | Offered origin load can approach 500k RPS. Admission controls must remain safe even before cache warmth returns. |
+| Predictable campaign spike | Prescale before launch; autoscaling alone is too late. |
+| Falling hit ratio | Protect origin with global admission, shield/coalescing and bounded refresh. |
+| Cold secondary CDN | Ramp traffic gradually within origin budget; do not fail over 100% blindly. |
+| Origin near safe limit | Shed optional public work and preserve banking reserve. |
+| Hot object | Edge caching absorbs repeated reads; validate byte/network pressure too. |
+| Higher provider capacity | Does not increase shared origin or banking dependency capacity. |
 
-![Origin pressure and the campaign overload calculation](assets/origin-capacity.svg)
-
-[Open the scalable origin-capacity diagram](assets/origin-capacity.svg)
-
-The campaign has two multipliers: total requests grow fivefold, and the miss fraction grows from 10% to 30%. Origin demand therefore grows **5 × 3 = 15 times**. A dashboard focused only on overall RPS or hit percentage can hide that relationship.
-
-For a mixed workload, use a more explicit model:
-
-```text
-Origin offered load = public RPS × (1 − public hit ratio)
-                    + uncached API RPS
-                    + validation / refresh / retry / warm-up load
-```
-
-Do not add uncached traffic twice if the measured aggregate hit ratio already includes it. Distinguish request hit ratio from byte hit ratio: serving a few large images from cache can save bandwidth while thousands of small dynamic calls still saturate the application.
-
-RPS also hides work per request. Measure concurrency, response time, CPU, network throughput, database calls, connection pools and expensive routes. At 15k RPS and 200 ms mean service time, roughly 3,000 requests are in flight in steady state; longer service time increases concurrency even if arrivals stay fixed. This is an illustrative application of `concurrency ≈ arrival rate × mean time`, not a sizing guarantee.
-
-### Prescaling and bounded elasticity
-
-Prescaling prepares known campaign demand before users arrive. It includes application instances, connection pools, downstream quotas, object-store limits, TLS capacity and provider commitments. Autoscaling responds to observed demand, but provisioning, initialization and cache warming take time. Scaling the web tier cannot overcome a fixed database bottleneck.
-
-1. Forecast demand and plausible low-hit or cold-cache conditions.
-2. Load-test the full dependency chain and establish a safe envelope with reserve.
-3. Prescale before the campaign, verify readiness and warm approved hot assets at a bounded rate.
-4. Apply aggregate origin admission across all CDNs, shields and background jobs.
-5. Reserve banking-service capacity; defer or shed lower-priority public work when the budget tightens.
-6. Ramp only while customer latency, errors and dependency saturation remain inside the approved envelope.
-
-Two CDNs each allowing 15k RPS into one 15k-RPS origin tier do not provide protection. Budgets must share the same global envelope, with conservative behavior when coordination is unavailable. Separate public and banking pools where needed so a public miss storm cannot exhaust the banking connection, CPU or database budget.
-
-### Emergency campaign response
-
-At 150k offered origin RPS, the immediate goal is to reduce work before an overloaded origin collapses. Scaling may help later; it is not the first line of protection during a provisioning delay.
-
-| Strategy | When it helps / required boundary |
-|---|---|
-| Serve approved stale public content | Buys time when a usable cached copy exists and the stale window permits it. Never serve stale balances, payment responses, withdrawn notices or expired offers that are no longer valid. |
-| Edge-generated temporary redirect | Sends a public campaign route to a prevalidated lightweight page or separately provisioned destination. Generate it before the overloaded origin, avoid loops and confirm destination capacity, certificates and policy. |
-| Versioned assets and controlled warm-up | Keep existing public assets reusable and prepare new versions gradually. Versioning alone does not fix an already cold fleet; a mass new version can increase misses. |
-| Request coalescing / shield | Reduces repeated fetches of the same object. It does little for millions of distinct keys or uncached APIs. |
-| Rate limits / concurrency limits / circuit breakers | Bound work and stop futile upstream calls. Return explicit failure or approved fallback rather than unbounded queues and retries. |
-| Reduce campaign demand | Pause rollout, reduce paid traffic or disable optional features with the business owner. Protect critical banking capacity while recovery proceeds. |
-
-A redirect is useful only when its destination escapes the bottleneck. Redirecting to another hostname backed by the same saturated origin merely moves the queue. Do not redirect sensitive API operations or replay payment bodies as a campaign workaround.
+Emergency response favors controlled degradation: stale public content where explicitly allowed, lightweight fallback pages, reduced campaign features and load shedding. Sensitive banking APIs keep their own correctness and residency rules.
 
 ## Reliability & Failure Modes
 
-Failure analysis follows the whole path: resolver, provider, edge policy, shield, origin, network, identity, banking service and data. At each boundary ask **what remains healthy, what traffic moves, what becomes cold, which policy still applies and whether the survivor can carry the load**.
-
-| Failure and remaining state | Detection, recovery and safety |
+| Failure | Safe response |
 |---|---|
-| One PoP is unreachable; other provider locations remain healthy | **Detect:** Geographic synthetics and user errors.<br>**Recover:** Provider routing may move connections; verify the actual client experience and cold-cache pressure. |
-| CDN A fails; CDN B and its origin path remain available | **Detect:** Independent probes and customer signals.<br>**Recover:** Shift only eligible traffic, progressively where possible; ensure B's configuration, certificates and capacity are ready. |
-| Both CDNs depend on a failed shared origin | **Detect:** Edge delivery works for hits but both providers fail on misses.<br>**Recover:** Healthy independent origin capacity or approved stale public content. Provider switching alone does not repair the origin. |
-| Origin replica fails while another survives | **Detect:** End-to-end health and dependency checks.<br>**Recover:** Route within permitted boundaries and measured survivor capacity; constrain misses and retries during the transition. |
-| Origin instances survive but the shared database fails | **Detect:** Application probes fail despite healthy instance checks.<br>**Recover:** Use the data tier's recovery procedure or fail safely. More origin replicas do not remove this dependency. |
-| Global purge, expiry or new release creates a miss storm | **Detect:** Miss/validation RPS and origin concurrency rise.<br>**Recover:** Coalesce, admit within budget, use permitted stale copies and stop broad invalidation. |
-| Purge succeeds in one CDN but lags in the other | **Detect:** Object-version probes and provider purge status disagree.<br>**Recover:** Complete targeted invalidation or withdraw affected content; do not call the release globally complete. |
-| DNS changes but some clients retain the old destination | **Detect:** Requests continue on old provider; regional probes diverge.<br>**Recover:** Keep safe overlap where possible and account for convergence in recovery time. |
-| TLS certificate or origin authentication breaks | **Detect:** Handshake errors, expiry alerts and authenticated-origin probes.<br>**Recover:** Restore valid trust using a tested rotation/rollback procedure; never disable verification to recover traffic. |
-| Residency metadata is missing or inconsistent | **Detect:** Gateway/service policy rejects and audit correlation.<br>**Recover:** Reject or use an explicitly authorized identity-resolution flow. Do not default to the nearest country. |
-| Edge deployment makes private routes cacheable | **Detect:** Negative cache tests, response-policy checks and synthetic cross-user probes.<br>**Recover:** Disable the rule, contain and purge, investigate exposure and retest before expansion. |
-| AI advisory service fails | **Detect:** Telemetry/model health and stale recommendation timestamps.<br>**Recover:** Stop relying on recommendations; deterministic delivery and protection continue. |
-
-### Multi-CDN and independent origins
-
-![Multi-CDN recovery within jurisdiction and origin failure domains](assets/multi-cdn-residency.svg)
-
-[Open the scalable multi-CDN and residency diagram](assets/multi-cdn-residency.svg)
-
-The public plane may use origins across regions when content policy permits. The sensitive plane uses independently resilient Canadian and UK service boundaries. Canada must not automatically fail over to the US, nor the UK to Ireland, merely because those locations are nearby. For this scenario, fail over within the approved country boundary or fail safely. A separately approved transfer policy would be a changed requirement, not an implicit consequence of GLB routing.
-
-Multi-CDN introduces its own costs: duplicated configuration, certificate lifecycle, cache fragmentation, inconsistent WAF semantics, purge coordination, split telemetry and different failure behavior. A lightly used secondary provider may have a colder cache than the primary. Test that condition rather than assuming its advertised edge capacity proves readiness.
-
-Maintain independent failure-domain analysis for DNS/steering, control planes, cloud regions or zones, origin networks, identity, data, secrets and deployment automation. Independence is never absolute; document unavoidable shared dependencies and their recovery contracts. A resilient shared origin tier can be simpler than dedicated per-CDN origins, while dedicated origins can provide useful isolation when downstream dependencies and capacity support it.
+| CDN node/provider failure | Steer to an eligible provider only after capacity/configuration checks. |
+| Secondary cache is cold | Ramp within miss budget; shield/coalesce; shed optional traffic if needed. |
+| Origin failure | Use independent healthy origin capacity; CDN diversity alone is insufficient. |
+| Shared dependency fails | Multi-CDN may still fail together; test DNS, config, data and origin dependencies. |
+| Region unavailable | Use only approved regional recovery; residency rules still apply. |
+| Purge/invalidation delay | Use versioned assets or targeted purge and verify convergence. |
 
 ### Five-minute recovery means useful service
 
-The recovery clock starts at the agreed incident onset and ends when the affected service is useful at its defined success, latency and policy criteria. It includes detection, decision, steering propagation, connection recovery, cold-cache refill and origin stabilization. Some phases overlap; measure the complete event rather than adding optimistic component estimates.
-
-An illustrative five-minute budget might allocate 30 seconds to detection, 30 seconds to decision, 120 seconds to steering/client convergence and 120 seconds to restoration verification. This is a planning allocation, not a measured result or a guarantee that DNS respects a two-minute deadline.
-
-The drill observed **12 minutes against a five-minute target**: a seven-minute miss, or 2.4 times the allowed recovery duration. The release decision is **NO-GO**. Diagnose the slow phases, remediate, repeat a representative exercise and obtain fresh sign-off. Passing functional tests or switching DNS within seconds does not change that outcome.
-
-Failback is another controlled traffic migration. Repair and verify the recovered destination, compare policy and content versions, warm within budget, canary traffic, observe and then ramp. Health hysteresis and hold-down periods prevent repeated provider oscillation from creating successive cold-cache storms.
+The drill's recovery target is **5 minutes**. Measure detection, steering, TLS readiness, cache state, origin capacity and end-to-end useful service. A DNS change alone is not recovery. The measured **12-minute** exercise remains a NO-GO until remediated and retested.
 
 ## Security
 
-The design protects availability and confidentiality at different layers. A **Web Application Firewall (WAF)** evaluates supported application-layer request rules. DDoS protection absorbs or filters network and application abuse. A WAF detects supported HTTP attack patterns. Authentication establishes identity. Authorization determines permitted actions. Residency policy determines allowed processing and storage. None of these controls replaces the others.
+- Terminate TLS only at approved locations; re-encryption does not mean the edge never saw plaintext.
+- Use WAF/DDoS/bot controls where the platform can inspect traffic.
+- Authenticate origins and block direct bypass where practical.
+- Keep sensitive balance/payment APIs non-cacheable and test cross-user isolation.
+- Enforce least privilege on CDN config, purge, certificates and routing changes.
+- Derive residency from trusted account/tenant policy, not IP geolocation or caller-supplied headers.
+- Apply the same residency review to logs, telemetry, backups and support access.
 
-### TLS termination and conditional passthrough
-
-An HTTP CDN normally terminates TLS to read requests, evaluate cache keys, inspect HTTP and serve cached responses. Re-encrypting the edge-to-origin connection protects that second link; it does not erase plaintext processing at the edge.
-
-**TLS passthrough is conditional.** It requires a provider and service mode that supports forwarding encrypted traffic to a permitted termination point. With genuine passthrough, the intermediary cannot perform ordinary HTTP caching or inspect encrypted HTTP with a WAF. Provider L4 services are not interchangeable with their HTTP CDN products; [Cloudflare Spectrum's configuration documentation](https://developers.cloudflare.com/spectrum/reference/configuration-options/) illustrates this distinction. Validate the contracted product's actual behavior instead of assuming that every CDN offers equivalent passthrough.
-
-Where the bank requires sensitive plaintext to remain within Canada or the UK, use approved regional TLS termination or a verified passthrough/direct regional design. Account for metadata, logs and support access even when payloads remain encrypted. A “cache bypass” setting alone does not establish residency.
-
-### Origin restriction and defense in depth
-
-| Area | Required control and boundary |
-|---|---|
-| Public edge | DDoS protection, WAF where inspection is allowed, bot controls and route-specific rate limits; test false positives on genuine users. |
-| Origin network | Private connectivity where supported, or restricted ingress from approved delivery paths. Block direct public bypass. |
-| Origin authentication | mTLS or equivalent authenticated origin access, with certificate rotation and tenant-specific trust. Provider IP allowlists alone do not identify the bank's distribution on shared infrastructure. |
-| Forwarded identity and IP | Strip untrusted forwarding headers; accept metadata only from authenticated proxies. Do not authorize on a spoofable header. |
-| Gateway and services | Validate identity and account scope independently; enforce trusted region mapping and least-privilege data credentials. |
-| Cache safety | Public-route allowlist, sensitive-route bypass, poisoning/deception tests and no sensitive bodies, tokens or identifiers in cache keys. |
-| Control plane | Least privilege, reviewed changes, separate deployment roles, protected purge credentials and immutable audit of emergency actions. |
-| Logs and analytics | Minimize personal data, redact tokens, restrict retention and keep processing/storage/access within approved boundaries. |
-
-Origin restrictions must apply to alternate hostnames, old addresses and disaster-recovery endpoints too. A hidden origin hostname is not an access control. Otherwise attackers can bypass the CDN's protection and hit the constrained origin directly.
-
-### Canadian and UK banking data residency
-
-The drill imposes Canadian and UK processing boundaries. Treat them as **scenario requirements approved by the bank**, not as a blanket statement that all Canadian or UK law universally prohibits international processing. Canada's privacy regulator explains that PIPEDA does not generally prohibit cross-border processing; UK rules govern restricted transfers and the conditions for them. See the [Canadian cross-border processing guidance](https://www.priv.gc.ca/en/privacy-topics/airports-and-borders/gl_dab_090127/) and the [ICO guide to international transfers](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/a-brief-guide-to-international-transfers/). Privacy, Legal and Compliance must determine the actual production obligations.
-
-For this design, enforce the stricter stated boundary throughout the request lifecycle:
-
-1. **Classify:** Identify public content, personal information, sensitive financial payloads and operational metadata.
-2. **Bind identity:** Derive account/tenant jurisdiction from trusted records or validated claims bound to those records. A user's current location is not the data's jurisdiction.
-3. **Constrain entry:** Ensure permitted TLS termination and processing before sensitive payloads reach an unauthorized edge.
-4. **Enforce twice:** Gateway rejects ineligible regional requests; services independently verify region and account access.
-5. **Constrain dependencies:** Apply policy to databases, replicas, backups, queues, fraud dependencies, logs, traces, exports and administrative access.
-6. **Constrain recovery:** Select only compliant destinations with validated capacity; deny service rather than silently crossing a forbidden boundary.
-
-Public content may cross regions when its content and distribution policy permits it. Public pages can still generate personal telemetry such as IP addresses or identifiers, so approval of the page does not automatically approve every analytics destination. Likewise, encrypting data in transit does not settle where storage, decryption, support access or processing is allowed.
+If a provider cannot meet required processing geography, route sensitive APIs through an approved regional termination path or use a verified passthrough design with the appropriate loss of L7 cache/WAF capabilities.
 
 ## Observability
 
-Measure the user's outcome, the cache's behavior and the origin's health together. The **95th and 99th percentile latencies (p95/p99)** expose slow-user experience; **Service Level Objectives (SLOs)** define the agreed success and latency targets. A provider can report healthy edges while misses fail, one country violates its latency target, or all banking calls are rejected by a broken gateway rule.
-
-| Signals | Meaning / response |
+| Signal | Why it matters |
 |---|---|
-| User success, p95/p99 latency and errors by market/provider/route | Shows whether delivery is useful; separates public browsing from banking availability. |
-| Hit, miss, bypass, expired, revalidated and stale outcomes | Explains origin demand. Separate public request hit ratio, aggregate ratio and byte hit ratio. |
-| Miss/validation RPS and origin concurrency | Predicts overload sooner than total CDN volume alone. Include refresh and retry traffic. |
-| Origin latency, CPU, connections, database pressure and `429/5xx` | Identifies the actual bottleneck and whether admission limits are protecting it. |
-| WAF actions, DDoS volume, bot scores and false positives | Distinguishes malicious load from legitimate campaign demand and blocked customers. |
-| DNS answers, provider steering share and client convergence | Shows whether the intended traffic shift actually happened. |
-| Certificate expiry, TLS failures and origin-auth rejects | Exposes trust and rotation failures before or during cutover. |
-| Content version and purge convergence by provider/PoP | Detects stale or mixed releases that aggregate availability misses. |
-| Gateway/service residency rejects and policy versions | Finds misrouting and configuration drift; rejected requests alone do not prove no earlier unauthorized processing occurred. |
-| Failover phase timestamps and sustained restoration | Provides evidence for the five-minute target, including cold-cache and survivor load. |
-| AI forecast error, lead time and recommendation age | Evaluates advisory value without making model availability a service dependency. |
+| Total RPS + cache hit/miss ratio | Converts traffic into origin demand. |
+| Origin RPS/concurrency/p95/p99 | Shows whether the safe envelope is threatened. |
+| Provider/PoP latency and errors | Distinguishes edge/provider issues from origin issues. |
+| Purge/config propagation | Detects multi-CDN policy drift. |
+| Banking latency/errors | Protects critical services independently from campaign health. |
+| Residency rejects / wrong-region attempts | Validates enforcement. |
+| Failover phase timings | Shows where the 5-minute recovery target is lost. |
 
-Correlate request ID, provider, PoP, route class, region, policy version and origin target. Keep tokens, account data and sensitive query values out of general telemetry. Edge `Age` and provider cache-status fields are diagnostic signals, not authorization proofs.
-
-Dashboards separate **User Experience / Public Cache / Banking APIs / Origin Capacity / Security / Residency / Recovery**. Alerts need a sustained-window policy, named owner and runbook. Use a leading capacity signal such as predicted miss demand plus rising concurrency, alongside hard limits that act without waiting for a dashboard or human response.
-
-Synthetic checks should include public hits, forced safe misses, authenticated test-account flows, wrong-region rejection and direct-origin denial from relevant geographies. A public homepage returning `200` is insufficient evidence that banking recovery succeeded.
+Monitor customer outcomes and shared dependencies, not only CDN health dashboards. A green edge with an overloaded origin is still a failing architecture.
 
 ## Key Architecture Decisions
 
